@@ -14,6 +14,7 @@ interface ExternalResponse {
 async function parseResponse(raw: unknown): Promise<ExternalResponse> {
   try {
     const text = await (raw as { text: () => Promise<string> }).text();
+    console.log('[sync] response:', text);
     return JSON.parse(text) as ExternalResponse;
   } catch {
     return { statusCode: 0, body: null, error: 'Failed to parse gateway response' };
@@ -47,15 +48,17 @@ export async function pushProduct(
   if (!uuid) return { status: 0, error: 'Product has no UUID — cannot sync.' };
 
   try {
-    const raw = await globalThis.PIM.api.external.call({
+    const response = await PIM.api.external.call({
       method: 'PATCH',
-      url: `${config.env2Host}/api/rest/v1/products-uuid/${encodeURIComponent(uuid)}`,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      url: `${config.env2Host}/api/rest/v1/products-uuid/${uuid}`,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: payload,
       credentials_code: config.credentialsCode,
-    });
+    } as any);
 
-    const res = await parseResponse(raw);
+    const res = await parseResponse(response);
     if (res.statusCode === 201 || res.statusCode === 204) return { status: res.statusCode };
     return { status: res.statusCode, error: formatError(res.body ?? res.error) };
   } catch (err) {
@@ -71,15 +74,17 @@ export async function pushProductModel(
   if (!code) return { status: 0, error: 'Product model has no code — cannot sync.' };
 
   try {
-    const raw = await globalThis.PIM.api.external.call({
+    const response = await PIM.api.external.call({
       method: 'PATCH',
-      url: `${config.env2Host}/api/rest/v1/product-models/${encodeURIComponent(code)}`,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      url: `${config.env2Host}/api/rest/v1/product-models/${code}`,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: payload,
       credentials_code: config.credentialsCode,
-    });
+    } as any);
 
-    const res = await parseResponse(raw);
+    const res = await parseResponse(response);
     if (res.statusCode === 201 || res.statusCode === 204) return { status: res.statusCode };
     return { status: res.statusCode, error: formatError(res.body ?? res.error) };
   } catch (err) {

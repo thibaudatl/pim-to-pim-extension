@@ -1,18 +1,17 @@
 import { useState } from 'react';
 import { StepIndicator } from './components/StepIndicator';
 import { ConfigStep } from './components/steps/ConfigStep';
-import { PreviewStep } from './components/steps/PreviewStep';
 import { SyncStep } from './components/steps/SyncStep';
 import { useProductSelection } from './hooks/useProductSelection';
 import { useSyncExecution } from './hooks/useSyncExecution';
 import { resolveSyncOrder } from './sync/dependencyResolver';
-import type { SyncConfig, SyncItem } from './sync/types';
+import type { SyncConfig } from './sync/types';
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 2;
 
 const DEFAULT_CONFIG: SyncConfig = {
   env2Host: '',
-  credentialsCode: 'env2_app_token',
+  credentialsCode: 'destination_pim_token',
   includeParentModels: true,
   includeGrandparentModels: true,
   overwriteExisting: true,
@@ -25,12 +24,11 @@ export default function App() {
     ...DEFAULT_CONFIG,
     env2Host: String(globalThis.PIM.custom_variables.destination_pim_url ?? ''),
   }));
-  const [syncItems, setSyncItems] = useState<SyncItem[]>([]);
 
   const selection = useProductSelection();
   const sync = useSyncExecution();
 
-  function handlePreview() {
+  function handleStartSync() {
     const items = resolveSyncOrder(
       selection.products,
       selection.productModels,
@@ -39,19 +37,14 @@ export default function App() {
       selection.selectedProductUuids,
       selection.selectedModelCodes
     );
-    setSyncItems(items);
-    setStep(2);
-  }
-
-  function handleStartSync() {
     sync.startSync(
-      syncItems,
+      items,
       selection.products,
       selection.productModels,
       selection.ancestorModels,
       config
     );
-    setStep(3);
+    setStep(2);
   }
 
   return (
@@ -90,20 +83,11 @@ export default function App() {
           productModels={selection.productModels}
           config={config}
           onConfigChange={setConfig}
-          onNext={handlePreview}
+          onNext={handleStartSync}
         />
       )}
 
-      {step === 2 && (
-        <PreviewStep
-          items={syncItems}
-          config={config}
-          onStart={handleStartSync}
-          onBack={() => setStep(1)}
-        />
-      )}
-
-      {step === 3 && <SyncStep sync={sync} config={config} />}
+      {step === 2 && <SyncStep sync={sync} config={config} />}
     </div>
   );
 }

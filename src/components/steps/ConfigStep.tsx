@@ -1,4 +1,4 @@
-import { Button, Helper, Checkbox } from 'akeneo-design-system';
+import { Button, Helper, Checkbox, Badge } from 'akeneo-design-system';
 import type { SyncConfig } from '../../sync/types';
 
 interface ConfigStepProps {
@@ -26,9 +26,9 @@ export function ConfigStep({
     onConfigChange({ ...config, [key]: !config[key] });
   }
 
-  const validProductCount = products.filter((p) => !!p.identifier).length;
+  const productCount = products.length;
   const modelCount = productModels.length;
-  const totalSelected = validProductCount + modelCount;
+  const totalSelected = productCount + modelCount;
 
   return (
     <div>
@@ -63,17 +63,102 @@ export function ConfigStep({
           }}
         >
           <strong>{totalSelected}</strong> item(s) selected:{' '}
-          {validProductCount > 0 && (
+          {productCount > 0 && (
             <span>
-              {validProductCount} product{validProductCount !== 1 ? 's' : ''}
+              {productCount} product{productCount !== 1 ? 's' : ''}
             </span>
           )}
-          {validProductCount > 0 && modelCount > 0 && ', '}
+          {productCount > 0 && modelCount > 0 && ', '}
           {modelCount > 0 && (
             <span>
               {modelCount} product model{modelCount !== 1 ? 's' : ''}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Selected items list */}
+      {!loading && !error && totalSelected > 0 && (
+        <div
+          style={{
+            border: '1px solid #E8EBEE',
+            borderRadius: '4px',
+            marginBottom: '16px',
+            overflow: 'hidden',
+            maxHeight: '280px',
+            overflowY: 'auto',
+          }}
+        >
+          {products.map((p, idx) => (
+            <div
+              key={p.uuid}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '8px 14px',
+                borderBottom:
+                  idx < products.length - 1 || productModels.length > 0
+                    ? '1px solid #F5F5FA'
+                    : 'none',
+                fontSize: '13px',
+              }}
+            >
+              <Badge level="primary">product</Badge>
+              <div
+                style={{
+                  flex: 1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {p.identifier && (
+                  <span style={{ fontWeight: 500, color: '#11324D' }}>{p.identifier}</span>
+                )}
+                {p.identifier && (
+                  <span style={{ color: '#67768A', margin: '0 6px' }}>·</span>
+                )}
+                <span
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: '11px',
+                    color: '#67768A',
+                  }}
+                >
+                  {p.uuid}
+                </span>
+              </div>
+            </div>
+          ))}
+          {productModels.map((m, idx) => (
+            <div
+              key={m.code}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '8px 14px',
+                borderBottom: idx < productModels.length - 1 ? '1px solid #F5F5FA' : 'none',
+                fontSize: '13px',
+              }}
+            >
+              <Badge level="secondary">model</Badge>
+              <span
+                style={{
+                  flex: 1,
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  color: '#11324D',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {m.code}
+              </span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -180,7 +265,7 @@ export function ConfigStep({
           onClick={onNext}
           disabled={loading || !!error || totalSelected === 0 || !config.env2Host}
         >
-          Preview →
+          Start Sync →
         </Button>
       </div>
     </div>
