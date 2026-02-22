@@ -33,6 +33,7 @@ export type DependencyType =
   | 'attribute'
   | 'attribute_option'
   | 'reference_entity_record'
+  | 'asset'
   | 'family'
   | 'family_variant'
   | 'category'
@@ -60,6 +61,8 @@ export interface DependencyTypeReport {
 export interface DependencyReport {
   types: DependencyTypeReport[];
   totalMissing: number;
+  /** Diagnostic messages from search/parse fallbacks (visible in report UI). */
+  diagnostics?: string[];
 }
 
 export interface DepSyncItem {
@@ -74,6 +77,7 @@ export interface StrippedCodes {
   categories: Set<string>;
   groups: Set<string>;
   associationTypes: Set<string>;
+  assetCodes: Set<string>;
 }
 
 export interface ExtractedDependencies {
@@ -88,4 +92,6 @@ export interface ExtractedDependencies {
   groupCodes: Set<string>;
   /** Map of reference entity code -> set of record codes */
   referenceEntityRecords: Map<string, Set<string>>;
+  /** Map of asset family code -> set of asset codes */
+  assets: Map<string, Set<string>>;
 }

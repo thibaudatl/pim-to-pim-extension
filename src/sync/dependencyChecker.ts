@@ -24,10 +24,10 @@ export async function checkDependencies(
 ): Promise<DependencyReport> {
   const types: DependencyTypeReport[] = [];
 
-  // 1. Attributes
+  // 1. Attributes — batched search with IN filter (falls back to individual GETs if body parsing fails)
   onProgress?.('Checking attributes…');
   try {
-    const missingAttrs = await checkByListing(deps.attributeCodes, '/attributes', config);
+    const missingAttrs = await checkBySearchIN(deps.attributeCodes, '/attributes', config);
     types.push({
       type: 'attribute',
       total: deps.attributeCodes.size,
@@ -40,8 +40,14 @@ export async function checkDependencies(
     const missingOptions: DependencyItem[] = [];
     let totalOptions = 0;
     for (const [attrCode, optionCodes] of deps.attributeOptions) {
-      if (missingAttrs.includes(attrCode)) continue;
       totalOptions += optionCodes.size;
+      if (missingAttrs.includes(attrCode)) {
+        // Attribute doesn't exist in destination — all its options are necessarily missing too
+        for (const optCode of optionCodes) {
+          missingOptions.push({ type: 'attribute_option', code: optCode, parentCode: attrCode });
+        }
+        continue;
+      }
       try {
         const missingOpts = await checkByListing(
           optionCodes,
@@ -130,7 +136,54 @@ export async function checkDependencies(
     }
   }
 
-  // 4. Families
+  // 4. Assets — batched search per asset family
+  onProgress?.('Checking assets…');
+  try {
+    const missingAssets: DependencyItem[] = [];
+    let totalAssets = 0;
+    for (const [assetFamilyCode, assetCodes] of deps.assets) {
+      totalAssets += assetCodes.size;
+      try {
+        const missing = await checkBySearchIN(
+          assetCodes,
+          `/asset-families/${encodeURIComponent(assetFamilyCode)}/assets`,
+          config
+        );
+        for (const assetCode of missing) {
+          missingAssets.push({
+            type: 'asset',
+            code: assetCode,
+            parentCode: assetFamilyCode,
+          });
+        }
+      } catch (err) {
+        if (err instanceof AccessDeniedError) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    types.push({
+      type: 'asset',
+      total: totalAssets,
+      missing: missingAssets,
+      resolution: 'create',
+    });
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      types.push({
+        type: 'asset',
+        total: 0,
+        missing: [],
+        resolution: 'skip',
+        accessDenied: true,
+      });
+    } else {
+      throw err;
+    }
+  }
+
+  // 5. Families — individual GETs (typically very few)
   onProgress?.('Checking families…');
   try {
     const missingFamilies = await checkByIndividualGet(
@@ -145,7 +198,7 @@ export async function checkDependencies(
       resolution: 'create',
     });
 
-    // 5. Family variants
+    // 6. Family variants — individual GETs (typically very few)
     onProgress?.('Checking family variants…');
     const missingFV: DependencyItem[] = [];
     let totalFV = 0;
@@ -196,10 +249,10 @@ export async function checkDependencies(
     }
   }
 
-  // 6. Categories
+  // 7. Categories — batched search with IN filter
   onProgress?.('Checking categories…');
   try {
-    const missingCategories = await checkByListing(deps.categoryCodes, '/categories', config);
+    const missingCategories = await checkBySearchIN(deps.categoryCodes, '/categories', config);
     types.push({
       type: 'category',
       total: deps.categoryCodes.size,
@@ -220,10 +273,10 @@ export async function checkDependencies(
     }
   }
 
-  // 7. Association types
+  // 8. Association types — batched search with IN filter
   onProgress?.('Checking association types…');
   try {
-    const missingAssocTypes = await checkByListing(
+    const missingAssocTypes = await checkBySearchIN(
       deps.associationTypeCodes,
       '/association-types',
       config
@@ -248,7 +301,7 @@ export async function checkDependencies(
     }
   }
 
-  // 8. Groups — no group API in SDK, always strip
+  // 9. Groups — no group API in SDK, always strip
   types.push({
     type: 'group',
     total: deps.groupCodes.size,
@@ -261,8 +314,140 @@ export async function checkDependencies(
 }
 
 /**
+ * Extract item codes from a paginated Akeneo API response body.
+ * Handles HAL format (_embedded.items), direct items array, and raw arrays.
+ */
+function extractItemCodes(body: unknown): string[] {
+  if (!body || typeof body !== 'object') return [];
+
+  // Body is a raw array of items
+  if (Array.isArray(body)) {
+    return body
+      .filter((item) => item && typeof item === 'object' && typeof (item as any).code === 'string')
+      .map((item) => (item as any).code);
+  }
+
+  const b = body as Record<string, unknown>;
+
+  // HAL format: { _embedded: { items: [...] } }
+  if (b._embedded && typeof b._embedded === 'object' && !Array.isArray(b._embedded)) {
+    const embedded = b._embedded as Record<string, unknown>;
+    if (Array.isArray(embedded.items)) {
+      return embedded.items
+        .filter((item) => item && typeof item === 'object' && typeof (item as any).code === 'string')
+        .map((item) => (item as any).code);
+    }
+  }
+
+  // Direct items array: { items: [...] }
+  if (Array.isArray(b.items)) {
+    return (b.items as any[])
+      .filter((item) => item && typeof item === 'object' && typeof item.code === 'string')
+      .map((item) => item.code);
+  }
+
+  return [];
+}
+
+/** Check if the body is a valid list response (even if empty). */
+function isValidListResponse(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  if (Array.isArray(body)) return true;
+  const b = body as Record<string, unknown>;
+  if (b._embedded && typeof b._embedded === 'object') {
+    const embedded = b._embedded as Record<string, unknown>;
+    if (Array.isArray(embedded.items)) return true;
+  }
+  if (Array.isArray(b.items)) return true;
+  return false;
+}
+
+/** Capture the shape of a response body for diagnostics. */
+function bodyDiag(body: unknown): string {
+  if (body === null) return 'null';
+  if (body === undefined) return 'undefined';
+  if (typeof body === 'string') return `string(len=${body.length}):"${body.slice(0, 120)}"`;
+  if (Array.isArray(body)) return `array(len=${body.length})`;
+  if (typeof body === 'object') {
+    const keys = Object.keys(body as Record<string, unknown>);
+    const preview: Record<string, string> = {};
+    for (const k of keys.slice(0, 6)) {
+      const v = (body as any)[k];
+      if (v === null || v === undefined) preview[k] = String(v);
+      else if (Array.isArray(v)) preview[k] = `array(${v.length})`;
+      else if (typeof v === 'object') preview[k] = `object(${Object.keys(v).length} keys)`;
+      else preview[k] = `${typeof v}:${String(v).slice(0, 40)}`;
+    }
+    return `object(keys=${keys.join(',')}) ${JSON.stringify(preview)}`;
+  }
+  return typeof body;
+}
+
+/**
+ * Encode a search parameter for the Akeneo REST API URL.
+ * Encodes " : , to percent-encoded form but leaves { } [ ] as-is,
+ * matching the encoding format the API expects.
+ */
+function encodeSearchParam(search: Record<string, unknown>): string {
+  return JSON.stringify(search)
+    .replace(/"/g, '%22')
+    .replace(/:/g, '%3A')
+    .replace(/,/g, '%2C');
+}
+
+/**
+ * Check existence by searching with a code IN filter.
+ * Batches codes in groups of 50, queries `basePath?search={"code":[{"operator":"IN","value":[...]}]}&limit=100`.
+ * If the search response can't be parsed (gateway body issue), falls back to individual GETs.
+ * Throws AccessDeniedError on 403/401.
+ */
+async function checkBySearchIN(
+  requiredCodes: Set<string>,
+  basePath: string,
+  config: SyncConfig
+): Promise<string[]> {
+  if (requiredCodes.size === 0) return [];
+
+  const allCodes = Array.from(requiredCodes);
+  const existingCodes = new Set<string>();
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < allCodes.length; i += BATCH_SIZE) {
+    const batch = allCodes.slice(i, i + BATCH_SIZE);
+    const search = encodeSearchParam({ code: [{ operator: 'IN', value: batch }] });
+    const path = `${basePath}?search=${search}&limit=100`;
+
+    const res = await destinationGet(path, config);
+
+    if (res.status === 403 || res.status === 401) {
+      throw new AccessDeniedError(res.status);
+    }
+    if (res.status === 0 && res.error && i === 0) {
+      throw new AccessDeniedError(403);
+    }
+
+    if (res.status >= 200 && res.status < 300) {
+      const codes = res.body ? extractItemCodes(res.body) : [];
+      if (codes.length === 0 && i === 0 && batch.length > 0 && !isValidListResponse(res.body)) {
+        // First batch returned 2xx but body isn't a recognizable list — throw with diagnostics
+        throw new Error(
+          `Could not parse ${basePath} search response (HTTP ${res.status}). ` +
+          `Body: ${bodyDiag(res.body)}`
+        );
+      }
+      for (const code of codes) {
+        existingCodes.add(code);
+      }
+    }
+  }
+
+  return allCodes.filter((code) => !existingCodes.has(code));
+}
+
+/**
  * List all items from a paginated endpoint, build a set of existing codes,
  * then diff against the required codes.
+ * Used for attribute options where search IN may not be supported.
  * Throws AccessDeniedError on 403/401.
  */
 async function checkByListing(
@@ -290,14 +475,11 @@ async function checkByListing(
       break;
     }
 
-    const body = res.body as Record<string, unknown>;
-    const embedded = body._embedded as Record<string, unknown> | undefined;
-    const items = (body.items ?? embedded?.items ?? []) as Array<{ code: string }>;
-
-    for (const item of items) {
-      if (item.code) existingCodes.add(item.code);
+    const codes = extractItemCodes(res.body);
+    for (const code of codes) {
+      existingCodes.add(code);
     }
-    hasMore = items.length === 100;
+    hasMore = codes.length === 100;
     page++;
   }
 

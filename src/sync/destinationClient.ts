@@ -14,6 +14,14 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
+function safeStringify(val: unknown): string {
+  try {
+    return JSON.stringify(val)?.slice(0, 300) ?? 'undefined';
+  } catch {
+    return String(val);
+  }
+}
+
 function isNullBodyError(err: unknown): boolean {
   const msg = getErrorMessage(err);
   return msg.includes('null body status') || msg.includes('null body');
@@ -43,9 +51,8 @@ export async function parseResponse(raw: unknown): Promise<DestinationResponse> 
   try {
     const r = raw as Record<string, unknown>;
 
+    // 1. Gateway-wrapped response: { statusCode: number, body: ... }
     if (typeof r.statusCode === 'number') {
-      // Gateway may wrap a null-body error into the response object itself
-      // e.g. { statusCode: 0, error: "Failed to construct 'Response': Response with null body status cannot have body" }
       const rawError = r.error != null ? String(r.error) : '';
       if (rawError.includes('null body status') || rawError.includes('null body')) {
         return { statusCode: 204, body: null };
@@ -53,7 +60,6 @@ export async function parseResponse(raw: unknown): Promise<DestinationResponse> 
 
       let body = r.body;
       if (typeof body === 'string') {
-        // Body may also contain the null-body error as a string
         if (body.includes('null body status') || body.includes('null body')) {
           return { statusCode: 204, body: null };
         }
@@ -61,15 +67,72 @@ export async function parseResponse(raw: unknown): Promise<DestinationResponse> 
           try { body = JSON.parse(body); } catch { /* keep as string */ }
         }
       }
+
+      // Unwrap nested gateway wrappers (external.call may double-wrap the response)
+      // e.g. outer { statusCode:200, body: { status:"success", statusCode:200, body: {actual}, ... } }
+      while (body && typeof body === 'object' && !Array.isArray(body)) {
+        const inner = body as Record<string, unknown>;
+        if (typeof inner.statusCode === 'number' && 'body' in inner) {
+          let nestedBody = inner.body;
+          if (typeof nestedBody === 'string' && nestedBody.length > 0) {
+            try { nestedBody = JSON.parse(nestedBody); } catch { /* keep as string */ }
+          }
+          body = nestedBody;
+        } else {
+          break;
+        }
+      }
+
       return { statusCode: r.statusCode as number, body, error: r.error };
     }
 
+    // 2. Response-like objects (have .status and .text()/.json())
+    const httpStatus = typeof r.status === 'number' ? (r.status as number) : 0;
+
+    if (httpStatus > 0) {
+      // Try .json() first (more reliable than .text() for parsed bodies)
+      if (typeof (r as any).json === 'function') {
+        try {
+          const jsonBody = await (r as any).json();
+          if (jsonBody != null) return { statusCode: httpStatus, body: jsonBody };
+        } catch { /* fall through to .text() */ }
+      }
+
+      // Try .text()
+      const text = typeof (r as any).text === 'function'
+        ? await (r as any).text().catch(() => '')
+        : '';
+
+      if (text) {
+        let body: unknown;
+        try { body = JSON.parse(text); } catch { body = text; }
+        return { statusCode: httpStatus, body };
+      }
+
+      return { statusCode: httpStatus, body: null };
+    }
+
+    // 3. Raw Akeneo API response (no gateway wrapping) — detect by known properties
+    if (r._embedded || r._links || r.current_page !== undefined) {
+      // Paginated list response returned directly
+      return { statusCode: 200, body: raw };
+    }
+    if (typeof r.code === 'string') {
+      // Single entity response returned directly
+      return { statusCode: 200, body: raw };
+    }
+
+    // 4. Fallback: try .text() without httpStatus
     const text = typeof (r as any).text === 'function'
       ? await (r as any).text().catch(() => '')
       : '';
+    if (text) {
+      let body: unknown;
+      try { body = JSON.parse(text); } catch { body = text; }
+      return { statusCode: 200, body };
+    }
 
-    if (!text) return { statusCode: 204, body: null };
-    return JSON.parse(text) as DestinationResponse;
+    return { statusCode: 0, body: null, error: 'Unrecognized response format' };
   } catch (err) {
     const msg = getErrorMessage(err);
     if (msg.includes('null body status') || msg.includes('null body')) {
@@ -104,29 +167,71 @@ export interface DestinationResult {
   error?: string;
 }
 
+function isNetworkError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return lower.includes('network error') || lower.includes('failed to fetch') || lower.includes('networkerror');
+}
+
+async function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Unwrap a gateway-wrapped body that parseResponse may return as-is.
+ * The gateway wrapper looks like: { status: "success", statusCode: 200, body: {actual}, contentType, error }
+ * When external.call returns a Response-like object, parseResponse uses .json() which gives us
+ * the wrapper as the parsed body. This function extracts the actual inner body.
+ */
+export function unwrapGatewayBody(res: DestinationResponse): DestinationResponse {
+  if (res.body && typeof res.body === 'object' && !Array.isArray(res.body)) {
+    const b = res.body as Record<string, unknown>;
+    // Detect gateway wrapper: has statusCode (number) + body + status (string like "success")
+    if (typeof b.statusCode === 'number' && 'body' in b && typeof b.status === 'string') {
+      let innerBody = b.body;
+      if (typeof innerBody === 'string' && innerBody.length > 0) {
+        try { innerBody = JSON.parse(innerBody); } catch { /* keep as string */ }
+      }
+      const innerStatus = b.statusCode as number;
+      const innerError = b.error != null ? b.error : undefined;
+      return { statusCode: innerStatus, body: innerBody, error: innerError };
+    }
+  }
+  return res;
+}
+
 export async function destinationGet(
   path: string,
   config: SyncConfig
 ): Promise<DestinationResult> {
-  try {
-    const response = await PIM.api.external.call({
-      method: 'GET',
-      url: `${config.env2Host}/api/rest/v1${path}`,
-      headers: { 'Content-Type': 'application/json' },
-      credentials_code: config.credentialsCode,
-    } as any);
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await PIM.api.external.call({
+        method: 'GET',
+        url: `${config.env2Host}/api/rest/v1${path}`,
+        headers: { 'Content-Type': 'application/json' },
+        credentials_code: config.credentialsCode,
+      } as any);
 
-    const res = await parseResponse(response);
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      return { status: res.statusCode, body: res.body };
+      const res = unwrapGatewayBody(await parseResponse(response));
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return { status: res.statusCode, body: res.body };
+      }
+      return { status: res.statusCode, error: formatError(res.body ?? res.error, res.statusCode) };
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      // Retry on network errors
+      if (attempt < maxRetries && isNetworkError(msg)) {
+        await delay(1000 * (attempt + 1));
+        continue;
+      }
+      // For GET requests, null body is NOT a success — it's likely a 403 or other error
+      // from the gateway that couldn't construct a Response object.
+      const status = extractStatusFromError(err);
+      return { status, error: msg };
     }
-    return { status: res.statusCode, error: formatError(res.body ?? res.error, res.statusCode) };
-  } catch (err) {
-    // For GET requests, null body is NOT a success — it's likely a 403 or other error
-    // from the gateway that couldn't construct a Response object.
-    const status = extractStatusFromError(err);
-    return { status, error: getErrorMessage(err) };
   }
+  return { status: 0, error: 'Max retries exceeded' };
 }
 
 export async function destinationPatch(
@@ -134,26 +239,37 @@ export async function destinationPatch(
   body: unknown,
   config: SyncConfig
 ): Promise<DestinationResult> {
-  try {
-    const response = await PIM.api.external.call({
-      method: 'PATCH',
-      url: `${config.env2Host}/api/rest/v1${path}`,
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      credentials_code: config.credentialsCode,
-    } as any);
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await PIM.api.external.call({
+        method: 'PATCH',
+        url: `${config.env2Host}/api/rest/v1${path}`,
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        credentials_code: config.credentialsCode,
+      } as any);
 
-    const res = await parseResponse(response);
-    if (res.statusCode === 201 || res.statusCode === 204) {
-      return { status: res.statusCode, body: res.body };
+      const res = unwrapGatewayBody(await parseResponse(response));
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return { status: res.statusCode, body: res.body };
+      }
+      const errorMsg = formatError(res.body ?? res.error, res.statusCode);
+      if (isNullBodyErrorString(errorMsg)) return { status: 204 };
+      if (res.statusCode === 500 && isNetworkError(errorMsg)) return { status: 204 };
+      return { status: res.statusCode, error: errorMsg };
+    } catch (err) {
+      if (isNullBodyError(err)) return { status: 204 };
+      const msg = getErrorMessage(err);
+      // Retry on network errors
+      if (attempt < maxRetries && isNetworkError(msg)) {
+        await delay(1000 * (attempt + 1));
+        continue;
+      }
+      return { status: 0, error: msg };
     }
-    const errorMsg = formatError(res.body ?? res.error, res.statusCode);
-    if (isNullBodyErrorString(errorMsg)) return { status: 204 };
-    return { status: res.statusCode, error: errorMsg };
-  } catch (err) {
-    if (isNullBodyError(err)) return { status: 204 };
-    return { status: 0, error: getErrorMessage(err) };
   }
+  return { status: 0, error: 'Max retries exceeded' };
 }
 
 export async function destinationPost(
@@ -161,24 +277,34 @@ export async function destinationPost(
   body: unknown,
   config: SyncConfig
 ): Promise<DestinationResult> {
-  try {
-    const response = await PIM.api.external.call({
-      method: 'POST',
-      url: `${config.env2Host}/api/rest/v1${path}`,
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      credentials_code: config.credentialsCode,
-    } as any);
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await PIM.api.external.call({
+        method: 'POST',
+        url: `${config.env2Host}/api/rest/v1${path}`,
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        credentials_code: config.credentialsCode,
+      } as any);
 
-    const res = await parseResponse(response);
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      return { status: res.statusCode, body: res.body };
+      const res = unwrapGatewayBody(await parseResponse(response));
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return { status: res.statusCode, body: res.body };
+      }
+      const errorMsg = formatError(res.body ?? res.error, res.statusCode);
+      if (isNullBodyErrorString(errorMsg)) return { status: 204 };
+      if (res.statusCode === 500 && isNetworkError(errorMsg)) return { status: 204 };
+      return { status: res.statusCode, error: errorMsg };
+    } catch (err) {
+      if (isNullBodyError(err)) return { status: 204 };
+      const msg = getErrorMessage(err);
+      if (attempt < maxRetries && isNetworkError(msg)) {
+        await delay(1000 * (attempt + 1));
+        continue;
+      }
+      return { status: 0, error: msg };
     }
-    const errorMsg = formatError(res.body ?? res.error, res.statusCode);
-    if (isNullBodyErrorString(errorMsg)) return { status: 204 };
-    return { status: res.statusCode, error: errorMsg };
-  } catch (err) {
-    if (isNullBodyError(err)) return { status: 204 };
-    return { status: 0, error: getErrorMessage(err) };
   }
+  return { status: 0, error: 'Max retries exceeded' };
 }

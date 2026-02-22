@@ -44,6 +44,9 @@ export async function createDependencies(
         case 'reference_entity_record':
           error = await createReferenceEntityRecord(item.code, item.parentCode!, config);
           break;
+        case 'asset':
+          error = await createAsset(item.code, item.parentCode!, config);
+          break;
         case 'family':
           error = await createFamily(item.code, config);
           break;
@@ -88,10 +91,11 @@ function orderByType(items: DependencyItem[]): DependencyItem[] {
     attribute: 0,
     attribute_option: 1,
     reference_entity_record: 2,
-    family: 3,
-    family_variant: 4,
-    category: 5,
-    association_type: 6,
+    asset: 3,
+    family: 4,
+    family_variant: 5,
+    category: 6,
+    association_type: 7,
   };
 
   const sorted = [...items].sort((a, b) => {
@@ -240,6 +244,53 @@ async function createReferenceEntityRecord(
   return undefined;
 }
 
+/** Cache of asset family code -> set of media_file attribute codes. */
+const assetMediaFileAttrsCache = new Map<string, Set<string>>();
+
+async function getMediaFileAttrCodes(assetFamilyCode: string): Promise<Set<string>> {
+  let cached = assetMediaFileAttrsCache.get(assetFamilyCode);
+  if (cached) return cached;
+  const attrs = await globalThis.PIM.api.asset_attribute_v1.list({ assetFamilyCode });
+  cached = new Set(attrs.filter((a) => a.type === 'media_file').map((a) => a.code));
+  assetMediaFileAttrsCache.set(assetFamilyCode, cached);
+  return cached;
+}
+
+async function createAsset(
+  code: string,
+  assetFamilyCode: string,
+  config: SyncConfig
+): Promise<string | undefined> {
+  const asset = await globalThis.PIM.api.asset_v1.get({ assetFamilyCode, code });
+  if (!asset) return `Asset "${code}" not found in source PIM`;
+
+  const mediaFileAttrCodes = await getMediaFileAttrCodes(assetFamilyCode);
+
+  // Pass values as-is from the SDK (same approach as createReferenceEntityRecord),
+  // only stripping media_file attributes whose binary files can't be uploaded
+  // through the external gateway (string body only).
+  const values: Record<string, unknown> = {};
+  if (asset.values && typeof asset.values === 'object' && !Array.isArray(asset.values)) {
+    for (const [attrCode, entries] of Object.entries(asset.values)) {
+      if (mediaFileAttrCodes.has(attrCode)) continue;
+      values[attrCode] = entries;
+    }
+  }
+
+  const payload: Record<string, unknown> = {
+    code: asset.code,
+    values,
+  };
+
+  const res = await destinationPatch(
+    `/asset-families/${encodeURIComponent(assetFamilyCode)}/assets/${encodeURIComponent(code)}`,
+    payload,
+    config
+  );
+  if (res.error) return res.error;
+  return undefined;
+}
+
 async function createFamily(
   code: string,
   config: SyncConfig
@@ -305,8 +356,8 @@ async function createCategory(
       `/categories/${encodeURIComponent(category.parent)}`,
       config
     );
-    if (parentCheck.status === 404) {
-      // Recursively create parent
+    if (parentCheck.status !== 200) {
+      // Parent doesn't exist or check failed — try to create it
       const parentErr = await createCategory(category.parent, config);
       if (parentErr) return `Failed to create parent category "${category.parent}": ${parentErr}`;
     }

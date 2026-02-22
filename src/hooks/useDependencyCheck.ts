@@ -7,7 +7,7 @@ import type {
   DepSyncItem,
   StrippedCodes,
 } from '../sync/types';
-import { loadAttributeTypeMap, loadReferenceDataNameMap, extractDependencies } from '../sync/dependencyExtractor';
+import { loadAttributeTypeMap, loadReferenceDataNameMap, loadAssetFamilyCodeMap, collectAttributeCodes, extractDependencies } from '../sync/dependencyExtractor';
 import { checkDependencies } from '../sync/dependencyChecker';
 import { createDependencies } from '../sync/dependencyCreator';
 
@@ -40,6 +40,7 @@ const EMPTY_STRIPPED: StrippedCodes = {
   categories: new Set(),
   groups: new Set(),
   associationTypes: new Set(),
+  assetCodes: new Set(),
 };
 
 export function useDependencyCheck(): UseDependencyCheckResult {
@@ -71,11 +72,15 @@ export function useDependencyCheck(): UseDependencyCheckResult {
       try {
         const allModels = [...productModels, ...ancestorModels];
 
-        const attrTypeMap = await loadAttributeTypeMap();
+        // Collect attribute codes from product values first (lightweight, no API calls)
+        const requiredAttrCodes = collectAttributeCodes(products, allModels);
+        // Load only those attributes from source PIM (batched search, not full listing)
+        const attrTypeMap = await loadAttributeTypeMap(requiredAttrCodes);
         const refDataNameMap = loadReferenceDataNameMap();
+        const assetFamilyCodeMap = loadAssetFamilyCodeMap();
         setProgressMessage('Extracting dependencies from products…');
 
-        const deps = extractDependencies(products, allModels, attrTypeMap, refDataNameMap);
+        const deps = extractDependencies(products, allModels, attrTypeMap, refDataNameMap, assetFamilyCodeMap);
 
         const depReport = await checkDependencies(deps, config, (msg) => {
           setProgressMessage(msg);
@@ -141,6 +146,7 @@ export function useDependencyCheck(): UseDependencyCheckResult {
         categories: new Set<string>(),
         groups: new Set<string>(),
         associationTypes: new Set<string>(),
+        assetCodes: new Set<string>(),
       };
 
       for (const t of report.types) {
@@ -149,6 +155,7 @@ export function useDependencyCheck(): UseDependencyCheckResult {
             if (t.type === 'category') stripped.categories.add(item.code);
             if (t.type === 'group') stripped.groups.add(item.code);
             if (t.type === 'association_type') stripped.associationTypes.add(item.code);
+            if (t.type === 'asset') stripped.assetCodes.add(item.code);
           }
         }
       }

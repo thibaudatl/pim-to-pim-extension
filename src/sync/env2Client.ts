@@ -1,5 +1,5 @@
 import type { SyncConfig } from './types';
-import { parseResponse, formatError } from './destinationClient';
+import { parseResponse, formatError, unwrapGatewayBody } from './destinationClient';
 
 interface PushResult {
   status: number;
@@ -35,10 +35,27 @@ function interpretPatchResult(res: { statusCode: number; body: unknown; error?: 
 
   const errorMsg = formatError(res.body ?? res.error);
 
-  // Final safety net: if the error that bubbled through is still a null-body artefact, treat as success
+  // Gateway artifacts for no-content (204) responses: the gateway can't construct
+  // a proper Response object and returns 500 with "null body" or "Network error" messages.
   if (isNullBodyErrorString(errorMsg)) return { status: 204 };
+  if (res.statusCode === 500 && isNetworkErrorString(errorMsg)) return { status: 204 };
 
   return { status: res.statusCode, error: errorMsg };
+}
+
+function isNetworkErrorString(error: string | undefined): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return lower.includes('network error') || lower.includes('failed to fetch');
+}
+
+function isNetworkError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return lower.includes('network error') || lower.includes('failed to fetch') || lower.includes('networkerror');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function pushProduct(
@@ -48,23 +65,32 @@ export async function pushProduct(
 ): Promise<PushResult> {
   if (!identifier) return { status: 0, error: 'Product has no identifier — cannot sync.' };
 
-  try {
-    const response = await PIM.api.external.call({
-      method: 'PATCH',
-      url: `${config.env2Host}/api/rest/v1/products/${encodeURIComponent(identifier)}`,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: payload,
-      credentials_code: config.credentialsCode,
-    } as any);
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await PIM.api.external.call({
+        method: 'PATCH',
+        url: `${config.env2Host}/api/rest/v1/products/${encodeURIComponent(identifier)}`,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: payload,
+        credentials_code: config.credentialsCode,
+      } as any);
 
-    const res = await parseResponse(response);
-    return interpretPatchResult(res);
-  } catch (err) {
-    if (isNullBodyError(err)) return { status: 204 };
-    return { status: 0, error: getErrorMessage(err) };
+      const res = unwrapGatewayBody(await parseResponse(response));
+      return interpretPatchResult(res);
+    } catch (err) {
+      if (isNullBodyError(err)) return { status: 204 };
+      const msg = getErrorMessage(err);
+      if (attempt < maxRetries && isNetworkError(msg)) {
+        await delay(1000 * (attempt + 1));
+        continue;
+      }
+      return { status: 0, error: msg };
+    }
   }
+  return { status: 0, error: 'Max retries exceeded' };
 }
 
 export async function pushProductModel(
@@ -74,21 +100,30 @@ export async function pushProductModel(
   const code = payload.code as string | undefined;
   if (!code) return { status: 0, error: 'Product model has no code — cannot sync.' };
 
-  try {
-    const response = await PIM.api.external.call({
-      method: 'PATCH',
-      url: `${config.env2Host}/api/rest/v1/product-models/${code}`,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: payload,
-      credentials_code: config.credentialsCode,
-    } as any);
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await PIM.api.external.call({
+        method: 'PATCH',
+        url: `${config.env2Host}/api/rest/v1/product-models/${code}`,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: payload,
+        credentials_code: config.credentialsCode,
+      } as any);
 
-    const res = await parseResponse(response);
-    return interpretPatchResult(res);
-  } catch (err) {
-    if (isNullBodyError(err)) return { status: 204 };
-    return { status: 0, error: getErrorMessage(err) };
+      const res = unwrapGatewayBody(await parseResponse(response));
+      return interpretPatchResult(res);
+    } catch (err) {
+      if (isNullBodyError(err)) return { status: 204 };
+      const msg = getErrorMessage(err);
+      if (attempt < maxRetries && isNetworkError(msg)) {
+        await delay(1000 * (attempt + 1));
+        continue;
+      }
+      return { status: 0, error: msg };
+    }
   }
+  return { status: 0, error: 'Max retries exceeded' };
 }

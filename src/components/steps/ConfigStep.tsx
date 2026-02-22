@@ -300,8 +300,8 @@ export function ConfigStep({
           {[
             {
               key: 'skipMediaValues' as const,
-              label: 'Skip assets & medias',
-              description: 'Omit images/files and asset data.',
+              label: 'Skip asset collections',
+              description: 'Omit asset collection values. Images/files are always excluded.',
             },
             {
               key: 'skipAssociations' as const,

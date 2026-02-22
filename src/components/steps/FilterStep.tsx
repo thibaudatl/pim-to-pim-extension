@@ -9,6 +9,7 @@ const TYPE_LABELS: Record<DependencyType, string> = {
   attribute: 'Attributes',
   attribute_option: 'Attribute options',
   reference_entity_record: 'Ref. entity records',
+  asset: 'Assets',
   family: 'Families',
   family_variant: 'Family variants',
   category: 'Categories',
@@ -37,19 +38,22 @@ function StatusIcon({ status }: { status: DepSyncItem['status'] }) {
 
 function ExpandableError({ error }: { error: string }) {
   const [expanded, setExpanded] = useState(false);
-  const isLong = error.length > 60;
+  const isLong = error.length > 80;
 
   if (!isLong) {
     return (
-      <span style={{ fontSize: '11px', color: '#D4604A', flexShrink: 0 }}>
+      <div style={{ fontSize: '11px', color: '#D4604A', wordBreak: 'break-word' }}>
         {error}
-      </span>
+      </div>
     );
   }
 
   return (
-    <span style={{ fontSize: '11px', color: '#D4604A', flexShrink: 0 }}>
-      {expanded ? error : error.slice(0, 60) + '…'}
+    <div style={{
+      fontSize: '11px', color: '#D4604A',
+      wordBreak: 'break-word', whiteSpace: expanded ? 'pre-wrap' : undefined,
+    }}>
+      {expanded ? error : error.slice(0, 80) + '…'}
       <button
         onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
         style={{
@@ -59,7 +63,7 @@ function ExpandableError({ error }: { error: string }) {
       >
         {expanded ? 'less' : 'more'}
       </button>
-    </span>
+    </div>
   );
 }
 
@@ -416,19 +420,21 @@ export function FilterStep({
             <div
               key={`${item.type}-${item.parentCode ?? ''}-${item.code}`}
               style={{
-                display: 'flex', alignItems: 'center', gap: '10px',
-                padding: '8px 14px', fontSize: '13px',
+                display: 'flex', alignItems: 'flex-start', gap: '10px',
+                padding: '8px 14px', fontSize: '13px', flexWrap: 'wrap',
                 borderBottom: idx < depSyncItems.length - 1 ? '1px solid #F5F5FA' : 'none',
                 background: item.status === 'error' ? '#FFF5F5' : item.status === 'success' ? '#F0FDF4' : '#FFFFFF',
               }}
             >
               <StatusIcon status={item.status} />
               <Badge level="secondary">{TYPE_LABELS[item.type] ?? item.type}</Badge>
-              <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#11324D', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#11324D', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {item.parentCode ? `${item.parentCode} → ` : ''}{item.code}
               </span>
               {item.error && (
-                <ExpandableError error={item.error} />
+                <div style={{ width: '100%', paddingTop: '4px' }}>
+                  <ExpandableError error={item.error} />
+                </div>
               )}
             </div>
           ))}

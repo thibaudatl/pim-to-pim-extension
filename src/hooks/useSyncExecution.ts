@@ -7,6 +7,7 @@ const EMPTY_STRIPPED: StrippedCodes = {
   categories: new Set(),
   groups: new Set(),
   associationTypes: new Set(),
+  assetCodes: new Set(),
 };
 
 export interface UseSyncExecutionResult {
@@ -41,7 +42,7 @@ export function useSyncExecution(): UseSyncExecutionResult {
     models: ProductModel[],
     ancestors: ProductModel[],
     config: SyncConfig,
-    mediaCodes: Set<string>,
+    mediaCodes: { alwaysStripped: Set<string>; assetCollections: Set<string> },
     stripped: StrippedCodes
   ): Record<string, unknown> {
     const allModels = [...models, ...ancestors];
@@ -68,9 +69,7 @@ export function useSyncExecution(): UseSyncExecutionResult {
       setIsDone(false);
 
       // Load media attribute codes once (cached after first call)
-      const mediaCodes = config.skipMediaValues
-        ? await loadMediaAttributeCodes()
-        : new Set<string>();
+      const mediaCodes = await loadMediaAttributeCodes();
 
       // Work on a mutable copy
       const current = allItems.map((i) => ({ ...i }));
