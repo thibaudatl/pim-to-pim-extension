@@ -52,10 +52,11 @@ function StatusIcon({ status }: { status: SyncItem['status'] }) {
 interface SyncStepProps {
   sync: UseSyncExecutionResult;
   config: SyncConfig;
-  onBackToConfigure: () => void;
+  onBack: () => void;
+  backLabel?: string;
 }
 
-export function SyncStep({ sync, config, onBackToConfigure }: SyncStepProps) {
+export function SyncStep({ sync, config, onBack, backLabel = '← Configure' }: SyncStepProps) {
   const { items, isRunning, isDone, retryFailed } = sync;
 
   const createdCount = items.filter((i) => i.status === 'success' && i.httpStatus === 201).length;
@@ -264,8 +265,8 @@ export function SyncStep({ sync, config, onBackToConfigure }: SyncStepProps) {
       {/* Actions */}
       {isDone && (
         <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button level="tertiary" onClick={onBackToConfigure}>
-            ← Configure
+          <Button level="tertiary" onClick={onBack}>
+            {backLabel}
           </Button>
           {errorCount > 0 && (
             <Button level="secondary" onClick={() => retryFailed(config)}>

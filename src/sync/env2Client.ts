@@ -1,60 +1,44 @@
 import type { SyncConfig } from './types';
+import { parseResponse, formatError } from './destinationClient';
 
 interface PushResult {
   status: number;
   error?: string;
 }
 
-/** The SDK throws this when it gets a 204 and tries to construct a Response with a body */
+/** Robust error message extraction for SES sandbox where instanceof Error can fail. */
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object' && 'message' in err) return String((err as any).message);
+  if (typeof err === 'string') return err;
+  return String(err);
+}
+
 function isNullBodyError(err: unknown): boolean {
-  return err instanceof Error && err.message.includes('null body status');
+  const msg = getErrorMessage(err);
+  return msg.includes('null body status') || msg.includes('null body');
 }
 
-interface ExternalResponse {
-  statusCode: number;
-  body: unknown;
-  error?: unknown;
+/** Check if a parsed error string looks like a null-body gateway artefact */
+function isNullBodyErrorString(error: string | undefined): boolean {
+  if (!error) return false;
+  return error.includes('null body status') || error.includes('null body');
 }
 
-async function parseResponse(raw: unknown): Promise<ExternalResponse> {
-  try {
-    const r = raw as Record<string, unknown>;
+/**
+ * Interpret a parsed response for PATCH calls.
+ * For PATCH, any null-body error (at any layer) is treated as 204 success,
+ * since it means the gateway couldn't construct a Response for a no-content status.
+ */
+function interpretPatchResult(res: { statusCode: number; body: unknown; error?: unknown }): PushResult {
+  if (res.statusCode === 201 || res.statusCode === 204) return { status: res.statusCode };
 
-    // The gateway may return a plain object with statusCode directly
-    if (typeof r.statusCode === 'number') {
-      return r as unknown as ExternalResponse;
-    }
+  const errorMsg = formatError(res.body ?? res.error);
 
-    // Or a Response-like object — read text safely
-    const text = typeof (r as any).text === 'function'
-      ? await (r as any).text().catch(() => '')
-      : '';
+  // Final safety net: if the error that bubbled through is still a null-body artefact, treat as success
+  if (isNullBodyErrorString(errorMsg)) return { status: 204 };
 
-    console.log('[sync] response:', text);
-    if (!text) return { statusCode: 204, body: null };
-    return JSON.parse(text) as ExternalResponse;
-  } catch {
-    return { statusCode: 0, body: null, error: 'Failed to parse gateway response' };
-  }
-}
-
-function formatError(body: unknown): string {
-  if (!body) return 'Unknown error';
-  if (typeof body === 'string') return body;
-  if (typeof body === 'object') {
-    const b = body as Record<string, unknown>;
-    if (typeof b.message === 'string') {
-      if (Array.isArray(b.errors) && b.errors.length > 0) {
-        const details = (b.errors as Record<string, unknown>[])
-          .map((e) => `${e.property ?? ''}: ${e.message ?? ''}`.trim())
-          .join(', ');
-        return `${b.message} — ${details}`;
-      }
-      return b.message;
-    }
-    return JSON.stringify(body);
-  }
-  return String(body);
+  return { status: res.statusCode, error: errorMsg };
 }
 
 export async function pushProduct(
@@ -76,11 +60,10 @@ export async function pushProduct(
     } as any);
 
     const res = await parseResponse(response);
-    if (res.statusCode === 201 || res.statusCode === 204) return { status: res.statusCode };
-    return { status: res.statusCode, error: formatError(res.body ?? res.error) };
+    return interpretPatchResult(res);
   } catch (err) {
     if (isNullBodyError(err)) return { status: 204 };
-    return { status: 0, error: err instanceof Error ? err.message : String(err) };
+    return { status: 0, error: getErrorMessage(err) };
   }
 }
 
@@ -103,10 +86,9 @@ export async function pushProductModel(
     } as any);
 
     const res = await parseResponse(response);
-    if (res.statusCode === 201 || res.statusCode === 204) return { status: res.statusCode };
-    return { status: res.statusCode, error: formatError(res.body ?? res.error) };
+    return interpretPatchResult(res);
   } catch (err) {
     if (isNullBodyError(err)) return { status: 204 };
-    return { status: 0, error: err instanceof Error ? err.message : String(err) };
+    return { status: 0, error: getErrorMessage(err) };
   }
 }

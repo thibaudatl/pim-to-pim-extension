@@ -7,6 +7,7 @@ export interface SyncConfig {
   skipMediaValues: boolean;
   skipAssociations: boolean;
   excludedAttributes: string[];
+  checkDependencies: boolean;
 }
 
 export type SyncItemType = 'product' | 'product_model';
@@ -24,4 +25,64 @@ export interface SyncItem {
   error?: string;
   /** true if this item was added as a dependency, not directly selected by the user */
   isAncestor: boolean;
+}
+
+// --------------- Dependency check types ---------------
+
+export type DependencyType =
+  | 'attribute'
+  | 'attribute_option'
+  | 'family'
+  | 'family_variant'
+  | 'category'
+  | 'association_type'
+  | 'group';
+
+export type DependencyResolution = 'create' | 'strip' | 'skip';
+
+export interface DependencyItem {
+  type: DependencyType;
+  code: string;
+  /** For attribute_option: attribute code. For family_variant: family code */
+  parentCode?: string;
+}
+
+export interface DependencyTypeReport {
+  type: DependencyType;
+  total: number;
+  missing: DependencyItem[];
+  resolution: DependencyResolution;
+  /** True when the destination returned 403/401 — check was skipped for this type */
+  accessDenied?: boolean;
+}
+
+export interface DependencyReport {
+  types: DependencyTypeReport[];
+  totalMissing: number;
+}
+
+export interface DepSyncItem {
+  type: DependencyType;
+  code: string;
+  parentCode?: string;
+  status: SyncItemStatus;
+  error?: string;
+}
+
+export interface StrippedCodes {
+  categories: Set<string>;
+  groups: Set<string>;
+  associationTypes: Set<string>;
+}
+
+export interface ExtractedDependencies {
+  attributeCodes: Set<string>;
+  /** Map of attribute code -> set of option codes (for select/multiselect) */
+  attributeOptions: Map<string, Set<string>>;
+  familyCodes: Set<string>;
+  /** Map of family code -> set of family variant codes */
+  familyVariants: Map<string, Set<string>>;
+  categoryCodes: Set<string>;
+  associationTypeCodes: Set<string>;
+  groupCodes: Set<string>;
 }

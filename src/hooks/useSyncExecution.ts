@@ -1,7 +1,13 @@
 import { useState, useCallback, useRef } from 'react';
-import type { SyncConfig, SyncItem } from '../sync/types';
+import type { SyncConfig, SyncItem, StrippedCodes } from '../sync/types';
 import { buildProductPayload, buildProductModelPayload, loadMediaAttributeCodes } from '../sync/payloadBuilder';
 import { pushProduct, pushProductModel } from '../sync/env2Client';
+
+const EMPTY_STRIPPED: StrippedCodes = {
+  categories: new Set(),
+  groups: new Set(),
+  associationTypes: new Set(),
+};
 
 export interface UseSyncExecutionResult {
   items: SyncItem[];
@@ -12,7 +18,8 @@ export interface UseSyncExecutionResult {
     products: Product[],
     productModels: ProductModel[],
     ancestorModels: ProductModel[],
-    config: SyncConfig
+    config: SyncConfig,
+    strippedCodes?: StrippedCodes
   ) => void;
   retryFailed: (config: SyncConfig) => void;
 }
@@ -26,6 +33,7 @@ export function useSyncExecution(): UseSyncExecutionResult {
   const storedProducts = useRef<Product[]>([]);
   const storedModels = useRef<ProductModel[]>([]);
   const storedAncestors = useRef<ProductModel[]>([]);
+  const storedStripped = useRef<StrippedCodes>(EMPTY_STRIPPED);
 
   function resolvePayload(
     item: SyncItem,
@@ -33,15 +41,16 @@ export function useSyncExecution(): UseSyncExecutionResult {
     models: ProductModel[],
     ancestors: ProductModel[],
     config: SyncConfig,
-    mediaCodes: Set<string>
+    mediaCodes: Set<string>,
+    stripped: StrippedCodes
   ): Record<string, unknown> {
     const allModels = [...models, ...ancestors];
     if (item.type === 'product') {
       const product = products.find((p) => p.uuid === item.uuid || p.identifier === item.id);
-      return product ? buildProductPayload(product, config, mediaCodes) : {};
+      return product ? buildProductPayload(product, config, mediaCodes, stripped) : {};
     } else {
       const model = allModels.find((m) => m.code === item.id);
-      return model ? buildProductModelPayload(model, config, mediaCodes) : {};
+      return model ? buildProductModelPayload(model, config, mediaCodes, stripped) : {};
     }
   }
 
@@ -52,7 +61,8 @@ export function useSyncExecution(): UseSyncExecutionResult {
       products: Product[],
       models: ProductModel[],
       ancestors: ProductModel[],
-      config: SyncConfig
+      config: SyncConfig,
+      stripped: StrippedCodes
     ) => {
       setIsRunning(true);
       setIsDone(false);
@@ -72,7 +82,7 @@ export function useSyncExecution(): UseSyncExecutionResult {
         current[idx] = { ...current[idx], status: 'in_progress' };
         setItems([...current]);
 
-        const payload = resolvePayload(item, products, models, ancestors, config, mediaCodes);
+        const payload = resolvePayload(item, products, models, ancestors, config, mediaCodes, stripped);
         current[idx] = { ...current[idx], payload };
 
         const result =
@@ -102,11 +112,13 @@ export function useSyncExecution(): UseSyncExecutionResult {
       products: Product[],
       productModels: ProductModel[],
       ancestorModels: ProductModel[],
-      config: SyncConfig
+      config: SyncConfig,
+      strippedCodes: StrippedCodes = EMPTY_STRIPPED
     ) => {
       storedProducts.current = products;
       storedModels.current = productModels;
       storedAncestors.current = ancestorModels;
+      storedStripped.current = strippedCodes;
 
       setItems(rawItems);
       setIsDone(false);
@@ -117,7 +129,8 @@ export function useSyncExecution(): UseSyncExecutionResult {
         products,
         productModels,
         ancestorModels,
-        config
+        config,
+        strippedCodes
       );
     },
     [runItems]
@@ -149,7 +162,8 @@ export function useSyncExecution(): UseSyncExecutionResult {
             storedProducts.current,
             storedModels.current,
             storedAncestors.current,
-            config
+            config,
+            storedStripped.current
           )
         , 0);
 

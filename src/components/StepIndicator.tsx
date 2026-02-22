@@ -1,7 +1,5 @@
 import styled from 'styled-components';
 
-const STEPS = ['Configure', 'Sync'];
-
 const Container = styled.div`
   display: flex;
   align-items: center;
@@ -43,12 +41,13 @@ const Connector = styled.div`
 
 interface StepIndicatorProps {
   currentStep: number;
+  steps?: string[];
 }
 
-export function StepIndicator({ currentStep }: StepIndicatorProps) {
+export function StepIndicator({ currentStep, steps = ['Configure', 'Sync'] }: StepIndicatorProps) {
   return (
     <Container>
-      {STEPS.flatMap((label, i) => {
+      {steps.flatMap((label, i) => {
         const stepNum = i + 1;
         const active = stepNum === currentStep;
         const done = stepNum < currentStep;
@@ -60,7 +59,7 @@ export function StepIndicator({ currentStep }: StepIndicatorProps) {
             {label}
           </StepItem>,
         ];
-        if (i < STEPS.length - 1) items.push(<Connector key={`conn-${i}`} />);
+        if (i < steps.length - 1) items.push(<Connector key={`conn-${i}`} />);
         return items;
       })}
     </Container>

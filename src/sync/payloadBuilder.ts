@@ -1,4 +1,4 @@
-import type { SyncConfig } from './types';
+import type { SyncConfig, StrippedCodes } from './types';
 
 const PRODUCT_SKIP = new Set(['uuid', 'links', 'completenesses', 'created', 'updated', 'metadata']);
 const MODEL_SKIP = new Set(['links', 'created', 'updated', 'metadata']);
@@ -58,21 +58,41 @@ function stripExcludedAttributes(
   return result;
 }
 
+const EMPTY_STRIPPED: StrippedCodes = {
+  categories: new Set(),
+  groups: new Set(),
+  associationTypes: new Set(),
+};
+
 export function buildProductPayload(
   product: Product,
   config: SyncConfig,
-  mediaCodes: Set<string>
+  mediaCodes: Set<string>,
+  strippedCodes: StrippedCodes = EMPTY_STRIPPED
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(product as Record<string, unknown>)) {
     if (PRODUCT_SKIP.has(k)) continue;
     if (config.skipAssociations && (k === 'associations' || k === 'quantifiedAssociations')) continue;
     const key = k === 'quantifiedAssociations' ? 'quantified_associations' : k;
+
     if (k === 'values') {
       let values = v as AttributeValues;
       if (config.skipMediaValues) values = stripMediaValues(values, mediaCodes);
       if (config.excludedAttributes.length > 0) values = stripExcludedAttributes(values, config.excludedAttributes);
       result[key] = values;
+    } else if (k === 'categories' && strippedCodes.categories.size > 0) {
+      result[key] = (v as string[]).filter((c) => !strippedCodes.categories.has(c));
+    } else if (k === 'groups' && strippedCodes.groups.size > 0) {
+      result[key] = (v as string[]).filter((g) => !strippedCodes.groups.has(g));
+    } else if ((k === 'associations' || k === 'quantifiedAssociations') && strippedCodes.associationTypes.size > 0) {
+      const filtered: Record<string, unknown> = {};
+      for (const [assocType, data] of Object.entries(v as Record<string, unknown>)) {
+        if (!strippedCodes.associationTypes.has(assocType)) {
+          filtered[assocType] = data;
+        }
+      }
+      result[key] = filtered;
     } else {
       result[key] = v;
     }
@@ -83,18 +103,30 @@ export function buildProductPayload(
 export function buildProductModelPayload(
   model: ProductModel,
   config: SyncConfig,
-  mediaCodes: Set<string>
+  mediaCodes: Set<string>,
+  strippedCodes: StrippedCodes = EMPTY_STRIPPED
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(model as Record<string, unknown>)) {
     if (MODEL_SKIP.has(k)) continue;
     if (config.skipAssociations && (k === 'associations' || k === 'quantifiedAssociations')) continue;
     const key = k === 'quantifiedAssociations' ? 'quantified_associations' : k;
+
     if (k === 'values') {
       let values = v as AttributeValues;
       if (config.skipMediaValues) values = stripMediaValues(values, mediaCodes);
       if (config.excludedAttributes.length > 0) values = stripExcludedAttributes(values, config.excludedAttributes);
       result[key] = values;
+    } else if (k === 'categories' && strippedCodes.categories.size > 0) {
+      result[key] = (v as string[]).filter((c) => !strippedCodes.categories.has(c));
+    } else if ((k === 'associations' || k === 'quantifiedAssociations') && strippedCodes.associationTypes.size > 0) {
+      const filtered: Record<string, unknown> = {};
+      for (const [assocType, data] of Object.entries(v as Record<string, unknown>)) {
+        if (!strippedCodes.associationTypes.has(assocType)) {
+          filtered[assocType] = data;
+        }
+      }
+      result[key] = filtered;
     } else {
       result[key] = v;
     }

@@ -4,22 +4,22 @@ let mainIdentifierCode: string | null = null;
 async function loadMainIdentifierCode(): Promise<string | null> {
   if (mainIdentifierCode !== null) return mainIdentifierCode;
 
-  let page = 1;
-  let hasMore = true;
-  while (hasMore) {
-    const result = await globalThis.PIM.api.attribute_v1.list({ limit: 100, page });
-    for (const attr of result.items) {
-      if (attr.type === 'pim_catalog_identifier' && attr.isMainIdentifier) {
-        mainIdentifierCode = attr.code;
-        return mainIdentifierCode;
-      }
+  // Filter by type to avoid paginating through all attributes
+  const result = await globalThis.PIM.api.attribute_v1.list({
+    search: { type: [{ operator: 'IN', value: ['pim_catalog_identifier'] }] },
+    limit: 100,
+  });
+
+  for (const attr of result.items) {
+    if (attr.isMainIdentifier) {
+      mainIdentifierCode = attr.code;
+      return mainIdentifierCode;
     }
-    hasMore = result.items.length === 100;
-    page++;
   }
 
-  mainIdentifierCode = '';
-  return '';
+  // Fallback: first identifier attribute, or empty
+  mainIdentifierCode = result.items[0]?.code ?? '';
+  return mainIdentifierCode;
 }
 
 /**
