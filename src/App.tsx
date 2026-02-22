@@ -21,6 +21,7 @@ const DEFAULT_CONFIG: SyncConfig = {
   overwriteExisting: true,
   skipMediaValues: true,
   skipAssociations: true,
+  skipCategories: false,
   excludedAttributes: [],
   checkDependencies: false,
 };

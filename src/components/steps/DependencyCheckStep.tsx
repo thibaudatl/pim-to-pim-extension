@@ -187,6 +187,7 @@ export function DependencyCheckStep({ depCheck, config, onBack }: DependencyChec
               onResolutionChange={depCheck.setResolution}
               excludedCodes={t.type === 'attribute' ? excludedAttributes : t.type === 'category' ? excludedCategories : undefined}
               onExcludeChange={handleExcludeChange}
+              disabled={t.type === 'category' && config.skipCategories}
             />
           ))}
         </div>
@@ -275,11 +276,13 @@ function TypeCard({
   onResolutionChange,
   excludedCodes,
   onExcludeChange,
+  disabled = false,
 }: {
   typeReport: DependencyTypeReport;
   onResolutionChange: (type: DependencyType, resolution: DependencyResolution) => void;
   excludedCodes?: string[];
   onExcludeChange?: (type: DependencyType, excludedCodes: string[]) => void;
+  disabled?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const { type, total, missing, resolution, accessDenied } = typeReport;
@@ -288,6 +291,32 @@ function TypeCard({
   const supportsExclusion = (type === 'attribute' || type === 'category') && missing.length > 0;
   const excluded = excludedCodes ?? [];
   const excludedSet = new Set(excluded);
+
+  if (disabled) {
+    return (
+      <div style={{
+        border: '1px solid #E8EBEE', borderRadius: '4px',
+        background: '#F5F5FA', overflow: 'hidden', opacity: 0.6,
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '12px',
+          padding: '10px 14px',
+        }}>
+          <span style={{ fontSize: '14px', fontWeight: 700, flexShrink: 0, color: '#A1A9B7' }}>
+            ⊘
+          </span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '13px', fontWeight: 500, color: '#A1A9B7' }}>
+              {TYPE_LABELS[type]}
+            </div>
+            <div style={{ fontSize: '12px', color: '#A1A9B7' }}>
+              Skipped — stripped from payload
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const borderColor = accessDenied ? '#67768A' : allPresent ? '#2FAF7B' : resolution === 'create' ? '#F5A623' : '#D4604A';
   const bgColor = accessDenied ? '#F5F5FA' : allPresent ? '#F0FDF4' : '#FFFFFF';

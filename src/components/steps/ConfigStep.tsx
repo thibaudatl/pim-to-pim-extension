@@ -251,20 +251,25 @@ export function ConfigStep({
           {[
             {
               key: 'includeParentModels' as const,
-              label: 'Include parent models',
-              description: 'Push parent models for variant products.',
-            },
-            {
-              key: 'includeGrandparentModels' as const,
-              label: 'Include grandparent models',
-              description: 'Also push root models (2-level variants).',
+              label: 'Include ancestor models',
+              description: 'Push parent and root models for variant products.',
+              toggleBoth: true,
             },
             {
               key: 'includeVariantProducts' as const,
               label: 'Include variant products',
               description: 'Also sync children products of selected product models.',
             },
-          ].map(({ key, label, description }) => (
+          ].map(({ key, label, description, toggleBoth }) => {
+            const handleToggle = () => {
+              if (toggleBoth) {
+                const newVal = !config[key];
+                onConfigChange({ ...config, includeParentModels: newVal, includeGrandparentModels: newVal });
+              } else {
+                toggle(key);
+              }
+            };
+            return (
             <div
               key={key}
               style={{
@@ -275,10 +280,10 @@ export function ConfigStep({
                 borderBottom: '1px solid #F5F5FA',
                 cursor: 'pointer',
               }}
-              onClick={() => toggle(key)}
+              onClick={handleToggle}
             >
               <div style={{ paddingTop: '2px' }}>
-                <Checkbox checked={config[key] as boolean} onChange={() => toggle(key)}>
+                <Checkbox checked={config[key] as boolean} onChange={handleToggle}>
                   {''}
                 </Checkbox>
               </div>
@@ -287,7 +292,8 @@ export function ConfigStep({
                 <div style={{ fontSize: '12px', color: '#67768A', marginTop: '2px' }}>{description}</div>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
 
         {/* Payload stripping section */}
@@ -312,6 +318,11 @@ export function ConfigStep({
               key: 'skipAssociations' as const,
               label: 'Skip associations',
               description: 'Omit associations and quantified associations.',
+            },
+            {
+              key: 'skipCategories' as const,
+              label: 'Skip categories',
+              description: 'Omit category assignments from the payload.',
             },
           ].map(({ key, label, description }) => (
             <div

@@ -249,27 +249,36 @@ export async function checkDependencies(
     }
   }
 
-  // 7. Categories — batched search with IN filter
-  onProgress?.('Checking categories…');
-  try {
-    const missingCategories = await checkBySearchIN(deps.categoryCodes, '/categories', config);
+  // 7. Categories — batched search with IN filter (skip when categories are stripped from payload)
+  if (config.skipCategories) {
     types.push({
       type: 'category',
       total: deps.categoryCodes.size,
-      missing: missingCategories.map((code) => ({ type: 'category', code })),
-      resolution: 'create',
+      missing: [],
+      resolution: 'skip',
     });
-  } catch (err) {
-    if (err instanceof AccessDeniedError) {
+  } else {
+    onProgress?.('Checking categories…');
+    try {
+      const missingCategories = await checkBySearchIN(deps.categoryCodes, '/categories', config);
       types.push({
         type: 'category',
         total: deps.categoryCodes.size,
-        missing: [],
-        resolution: 'skip',
-        accessDenied: true,
+        missing: missingCategories.map((code) => ({ type: 'category', code })),
+        resolution: 'create',
       });
-    } else {
-      throw err;
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        types.push({
+          type: 'category',
+          total: deps.categoryCodes.size,
+          missing: [],
+          resolution: 'skip',
+          accessDenied: true,
+        });
+      } else {
+        throw err;
+      }
     }
   }
 

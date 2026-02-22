@@ -97,6 +97,7 @@ export function buildProductPayload(
   for (const [k, v] of Object.entries(product as Record<string, unknown>)) {
     if (PRODUCT_SKIP.has(k)) continue;
     if (config.skipAssociations && (k === 'associations' || k === 'quantifiedAssociations')) continue;
+    if (config.skipCategories && k === 'categories') continue;
     const key = k === 'quantifiedAssociations' ? 'quantified_associations' : k;
 
     if (k === 'values') {
@@ -133,6 +134,7 @@ export function buildProductModelPayload(
   for (const [k, v] of Object.entries(model as Record<string, unknown>)) {
     if (MODEL_SKIP.has(k)) continue;
     if (config.skipAssociations && (k === 'associations' || k === 'quantifiedAssociations')) continue;
+    if (config.skipCategories && k === 'categories') continue;
     const key = k === 'quantifiedAssociations' ? 'quantified_associations' : k;
 
     if (k === 'values') {

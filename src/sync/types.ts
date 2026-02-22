@@ -7,6 +7,7 @@ export interface SyncConfig {
   overwriteExisting: boolean;
   skipMediaValues: boolean;
   skipAssociations: boolean;
+  skipCategories: boolean;
   excludedAttributes: string[];
   checkDependencies: boolean;
 }
