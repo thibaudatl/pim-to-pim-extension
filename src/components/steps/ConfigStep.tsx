@@ -259,6 +259,11 @@ export function ConfigStep({
               label: 'Include grandparent models',
               description: 'Also push root models (2-level variants).',
             },
+            {
+              key: 'includeVariantProducts' as const,
+              label: 'Include variant products',
+              description: 'Also sync children products of selected product models.',
+            },
           ].map(({ key, label, description }) => (
             <div
               key={key}
@@ -373,7 +378,7 @@ export function ConfigStep({
           onClick={onNext}
           disabled={loading || !!error || totalSelected === 0 || !config.env2Host}
         >
-          {config.checkDependencies ? 'Next →' : 'Start Sync →'}
+          Next →
         </Button>
       </div>
     </div>

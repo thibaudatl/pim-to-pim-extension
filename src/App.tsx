@@ -17,6 +17,7 @@ const DEFAULT_CONFIG: SyncConfig = {
   credentialsCode: 'destination_pim_token',
   includeParentModels: true,
   includeGrandparentModels: true,
+  includeVariantProducts: false,
   overwriteExisting: true,
   skipMediaValues: true,
   skipAssociations: true,
@@ -37,29 +38,10 @@ export default function App() {
 
   // Auto-advance from step 2 (Dependencies) to step 3 (Filter) when dep check completes
   useEffect(() => {
-    if (step === 2 && depCheck.phase === 'done') {
+    if (step === 2 && config.checkDependencies && depCheck.phase === 'done') {
       setStep(3);
     }
-  }, [step, depCheck.phase]);
-
-  function handleStartSync() {
-    const items = resolveSyncOrder(
-      selection.products,
-      selection.productModels,
-      selection.ancestorModels,
-      config,
-      selection.selectedProductUuids,
-      selection.selectedModelCodes
-    );
-    sync.startSync(
-      items,
-      selection.products,
-      selection.productModels,
-      selection.ancestorModels,
-      config
-    );
-    setStep(config.checkDependencies ? 4 : 2);
-  }
+  }, [step, config.checkDependencies, depCheck.phase]);
 
   function handleNext() {
     if (config.checkDependencies) {
@@ -69,11 +51,12 @@ export default function App() {
         selection.products,
         selection.productModels,
         selection.ancestorModels,
-        config
+        config,
+        selection.variantProducts
       );
     } else {
-      // Skip dependency check, go straight to sync
-      handleStartSync();
+      // Go to filter step (no dependency check)
+      setStep(2);
     }
   }
 
@@ -91,17 +74,21 @@ export default function App() {
       selection.ancestorModels,
       mergedConfig,
       selection.selectedProductUuids,
-      selection.selectedModelCodes
+      selection.selectedModelCodes,
+      selection.variantProducts
     );
+    const allProducts = mergedConfig.includeVariantProducts
+      ? [...selection.products, ...selection.variantProducts]
+      : selection.products;
     sync.startSync(
       items,
-      selection.products,
+      allProducts,
       selection.productModels,
       selection.ancestorModels,
       mergedConfig,
       depCheck.strippedCodes
     );
-    setStep(4);
+    setStep(config.checkDependencies ? 4 : 3);
   }
 
   function handleBackToConfigure() {
@@ -118,14 +105,13 @@ export default function App() {
     if (config.checkDependencies) {
       setStep(3);
     } else {
-      setStep(1);
+      setStep(2);
     }
   }
 
-  // Map visual step number based on whether dependency check is enabled
-  const visualStep = config.checkDependencies
-    ? step  // 1=Configure, 2=Dependencies, 3=Filter, 4=Sync
-    : step === 1 ? 1 : 2;  // 1=Configure, 2=Sync (skip deps)
+  // Step mapping:
+  // With deps:    1=Configure, 2=Dependencies, 3=Filter, 4=Sync
+  // Without deps: 1=Configure, 2=Filter, 3=Sync
 
   return (
     <div
@@ -153,10 +139,10 @@ export default function App() {
       </div>
 
       <StepIndicator
-        currentStep={visualStep}
+        currentStep={step}
         steps={config.checkDependencies
           ? ['Configure', 'Dependencies', 'Filter', 'Sync']
-          : ['Configure', 'Sync']
+          : ['Configure', 'Filter', 'Sync']
         }
       />
 
@@ -181,20 +167,21 @@ export default function App() {
         />
       )}
 
-      {step === 3 && config.checkDependencies && (
+      {((step === 3 && config.checkDependencies) || (step === 2 && !config.checkDependencies)) && (
         <FilterStep
           depCheck={depCheck}
           products={selection.products}
           productModels={selection.productModels}
           config={config}
           onConfigChange={setConfig}
-          onBack={handleBackToReport}
+          onBack={config.checkDependencies ? handleBackToReport : handleBackToConfigure}
           onProceed={handleStartSyncFromFilter}
+          backLabel={config.checkDependencies ? '← Dependencies' : '← Configure'}
         />
       )}
 
-      {((step === 2 && !config.checkDependencies) || step === 4) && (
-        <SyncStep sync={sync} config={config} onBack={handleBackFromSync} backLabel={config.checkDependencies ? '← Filter' : '← Configure'} />
+      {((step === 3 && !config.checkDependencies) || step === 4) && (
+        <SyncStep sync={sync} config={config} onBack={handleBackFromSync} backLabel="← Filter" />
       )}
     </div>
   );

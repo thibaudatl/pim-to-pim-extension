@@ -53,6 +53,45 @@ export async function fetchProductModels(codes: string[]): Promise<ProductModel[
 }
 
 /**
+ * Fetches variant products (children) of the given product model codes.
+ * Paginates through results and filters out products already selected by the user.
+ */
+export async function fetchVariantProducts(
+  modelCodes: string[],
+  alreadySelectedUuids: Set<string>
+): Promise<Product[]> {
+  if (modelCodes.length === 0) return [];
+
+  const identifierCode = await loadMainIdentifierCode();
+  const allVariants: Product[] = [];
+
+  for (const modelCode of modelCodes) {
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      const result = await globalThis.PIM.api.product_uuid_v1.list({
+        search: { parent: [{ operator: '=', value: modelCode }] },
+        limit: 100,
+        page,
+      });
+
+      for (const product of result.items) {
+        if (!alreadySelectedUuids.has(product.uuid)) {
+          allVariants.push(product);
+        }
+      }
+
+      hasMore = result.items.length === 100;
+      page++;
+    }
+  }
+
+  if (identifierCode) resolveIdentifiers(allVariants, identifierCode);
+  return allVariants;
+}
+
+/**
  * Recursively fetches parent product models that are not already in knownCodes.
  * Handles both 1-level (parent model → variant) and 2-level hierarchies
  * (root model → sub-model → variant).

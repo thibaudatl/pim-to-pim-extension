@@ -10,7 +10,8 @@ export function resolveSyncOrder(
   ancestorModels: ProductModel[],
   config: SyncConfig,
   selectedProductUuids: Set<string>,
-  selectedModelCodes: Set<string>
+  selectedModelCodes: Set<string>,
+  variantProducts: Product[] = []
 ): SyncItem[] {
   // Build the set of models to include
   const modelsToInclude: ProductModel[] = [...directModels];
@@ -49,6 +50,11 @@ export function resolveSyncOrder(
   const sortedModels = topoSortModels(modelsToInclude);
   const validProducts = products;
 
+  // Include variant products when enabled, deduplicating against already-selected products
+  const variantsToInclude: Product[] = config.includeVariantProducts
+    ? variantProducts.filter((v) => !selectedProductUuids.has(v.uuid))
+    : [];
+
   const result: SyncItem[] = [
     ...sortedModels.map(
       (m): SyncItem => ({
@@ -67,6 +73,16 @@ export function resolveSyncOrder(
         payload: {},
         status: 'pending' as SyncItemStatus,
         isAncestor: !selectedProductUuids.has(p.uuid),
+      })
+    ),
+    ...variantsToInclude.map(
+      (p): SyncItem => ({
+        type: 'product' as SyncItemType,
+        id: p.identifier ?? p.uuid,
+        uuid: p.uuid,
+        payload: {},
+        status: 'pending' as SyncItemStatus,
+        isAncestor: false,
       })
     ),
   ];

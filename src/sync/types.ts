@@ -3,6 +3,7 @@ export interface SyncConfig {
   credentialsCode: string;
   includeParentModels: boolean;
   includeGrandparentModels: boolean;
+  includeVariantProducts: boolean;
   overwriteExisting: boolean;
   skipMediaValues: boolean;
   skipAssociations: boolean;

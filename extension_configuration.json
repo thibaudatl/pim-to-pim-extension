@@ -2,7 +2,7 @@
   "position": "pim.product-grid.action-bar",
   "name": "pim_to_pim_sync",
   "type": "sdk_script",
-  "file": "dist/pim-to-pim-sync-v0.0.69-20260222-1744.js",
+  "file": "dist/pim-to-pim-sync-v0.0.71-20260222-1807.js",
   "configuration": {
     "default_label": "Sync to other PIM",
     "labels": {

@@ -81,6 +81,7 @@ interface FilterStepProps {
   onConfigChange: (config: SyncConfig) => void;
   onBack: () => void;
   onProceed: () => void;
+  backLabel?: string;
 }
 
 export function FilterStep({
@@ -91,6 +92,7 @@ export function FilterStep({
   onConfigChange,
   onBack,
   onProceed,
+  backLabel = '← Dependencies',
 }: FilterStepProps) {
   const { report, depSyncItems } = depCheck;
   const [search, setSearch] = useState('');
@@ -644,7 +646,7 @@ export function FilterStep({
       {/* Navigation */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
         <Button level="tertiary" onClick={onBack}>
-          ← Dependencies
+          {backLabel}
         </Button>
         <Button level="primary" onClick={onProceed}>
           Start Sync →

@@ -26,7 +26,8 @@ export interface UseDependencyCheckResult {
     products: Product[],
     productModels: ProductModel[],
     ancestorModels: ProductModel[],
-    config: SyncConfig
+    config: SyncConfig,
+    variantProducts?: Product[]
   ) => void;
   setResolution: (type: DependencyType, resolution: DependencyResolution) => void;
   setExcludedAttributes: (codes: string[]) => void;
@@ -58,7 +59,8 @@ export function useDependencyCheck(): UseDependencyCheckResult {
       products: Product[],
       productModels: ProductModel[],
       ancestorModels: ProductModel[],
-      config: SyncConfig
+      config: SyncConfig,
+      variantProducts: Product[] = []
     ) => {
       setPhase('analyzing');
       setProgressMessage('Loading attribute definitions…');
@@ -71,16 +73,19 @@ export function useDependencyCheck(): UseDependencyCheckResult {
 
       try {
         const allModels = [...productModels, ...ancestorModels];
+        const allProducts = config.includeVariantProducts
+          ? [...products, ...variantProducts]
+          : products;
 
         // Collect attribute codes from product values first (lightweight, no API calls)
-        const requiredAttrCodes = collectAttributeCodes(products, allModels);
+        const requiredAttrCodes = collectAttributeCodes(allProducts, allModels);
         // Load only those attributes from source PIM (batched search, not full listing)
         const attrTypeMap = await loadAttributeTypeMap(requiredAttrCodes);
         const refDataNameMap = loadReferenceDataNameMap();
         const assetFamilyCodeMap = loadAssetFamilyCodeMap();
         setProgressMessage('Extracting dependencies from products…');
 
-        const deps = extractDependencies(products, allModels, attrTypeMap, refDataNameMap, assetFamilyCodeMap);
+        const deps = extractDependencies(allProducts, allModels, attrTypeMap, refDataNameMap, assetFamilyCodeMap);
 
         const depReport = await checkDependencies(deps, config, (msg) => {
           setProgressMessage(msg);

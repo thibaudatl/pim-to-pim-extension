@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { fetchProducts, fetchProductModels, fetchAncestorModels } from '../sync/productFetcher';
+import { fetchProducts, fetchProductModels, fetchAncestorModels, fetchVariantProducts } from '../sync/productFetcher';
 
 export interface UseProductSelectionResult {
   products: Product[];
   productModels: ProductModel[];
   ancestorModels: ProductModel[];
+  variantProducts: Product[];
   selectedProductUuids: Set<string>;
   selectedModelCodes: Set<string>;
   loading: boolean;
@@ -16,6 +17,7 @@ export function useProductSelection(): UseProductSelectionResult {
   const [products, setProducts] = useState<Product[]>([]);
   const [productModels, setProductModels] = useState<ProductModel[]>([]);
   const [ancestorModels, setAncestorModels] = useState<ProductModel[]>([]);
+  const [variantProducts, setVariantProducts] = useState<Product[]>([]);
   const [selectedProductUuids, setSelectedProductUuids] = useState<Set<string>>(new Set());
   const [selectedModelCodes, setSelectedModelCodes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -57,11 +59,19 @@ export function useProductSelection(): UseProductSelectionResult {
         const allItems: Array<{ parent?: string | null }> = [...fetchedProducts, ...fetchedModels];
         const ancestors = await fetchAncestorModels(allItems, knownModelCodes);
 
+        // Fetch variant products (children) of all selected product models
+        const allModelCodes = [
+          ...productModelCodes,
+          ...ancestors.map((m) => m.code).filter((c): c is string => !!c),
+        ];
+        const variants = await fetchVariantProducts(allModelCodes, new Set(productUuids));
+
         const warns: string[] = [];
 
         setProducts(fetchedProducts);
         setProductModels(fetchedModels);
         setAncestorModels(ancestors);
+        setVariantProducts(variants);
         setWarnings(warns);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -77,6 +87,7 @@ export function useProductSelection(): UseProductSelectionResult {
     products,
     productModels,
     ancestorModels,
+    variantProducts,
     selectedProductUuids,
     selectedModelCodes,
     loading,
