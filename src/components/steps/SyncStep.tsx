@@ -52,12 +52,15 @@ function StatusIcon({ status }: { status: SyncItem['status'] }) {
 interface SyncStepProps {
   sync: UseSyncExecutionResult;
   config: SyncConfig;
+  onBackToConfigure: () => void;
 }
 
-export function SyncStep({ sync, config }: SyncStepProps) {
+export function SyncStep({ sync, config, onBackToConfigure }: SyncStepProps) {
   const { items, isRunning, isDone, retryFailed } = sync;
 
-  const doneCount = items.filter((i) => i.status === 'success').length;
+  const createdCount = items.filter((i) => i.status === 'success' && i.httpStatus === 201).length;
+  const updatedCount = items.filter((i) => i.status === 'success' && i.httpStatus === 204).length;
+  const doneCount = createdCount + updatedCount;
   const errorCount = items.filter((i) => i.status === 'error').length;
   const skippedCount = items.filter((i) => i.status === 'skipped').length;
   const total = items.length;
@@ -78,7 +81,7 @@ export function SyncStep({ sync, config }: SyncStepProps) {
       {/* Summary when done */}
       {isDone && (
         <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {doneCount > 0 && (
+          {createdCount > 0 && (
             <span
               style={{
                 padding: '6px 12px',
@@ -90,7 +93,22 @@ export function SyncStep({ sync, config }: SyncStepProps) {
                 fontWeight: 600,
               }}
             >
-              ✓ {doneCount} synced
+              ✓ {createdCount} created
+            </span>
+          )}
+          {updatedCount > 0 && (
+            <span
+              style={{
+                padding: '6px 12px',
+                background: '#F0FDF4',
+                border: '1px solid #2FAF7B',
+                borderRadius: '4px',
+                fontSize: '13px',
+                color: '#2FAF7B',
+                fontWeight: 600,
+              }}
+            >
+              ✓ {updatedCount} updated
             </span>
           )}
           {errorCount > 0 && (
@@ -164,29 +182,44 @@ export function SyncStep({ sync, config }: SyncStepProps) {
               <Badge level={item.type === 'product_model' ? 'secondary' : 'primary'}>
                 {item.type === 'product_model' ? 'model' : 'product'}
               </Badge>
-              <span
+              <div
                 style={{
                   flex: 1,
-                  fontFamily: 'monospace',
-                  fontSize: '12px',
-                  color: '#11324D',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {item.id}
-              </span>
+                {item.type === 'product' && item.uuid !== item.id && (
+                  <span style={{ fontWeight: 500, fontSize: '13px', color: '#11324D' }}>{item.id}</span>
+                )}
+                {item.type === 'product' && item.uuid !== item.id && (
+                  <span style={{ color: '#67768A', margin: '0 6px' }}>·</span>
+                )}
+                <span
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: item.type === 'product' && item.uuid !== item.id ? '11px' : '12px',
+                    color: item.type === 'product' && item.uuid !== item.id ? '#67768A' : '#11324D',
+                  }}
+                >
+                  {item.type === 'product' ? item.uuid : item.id}
+                </span>
+              </div>
               {item.httpStatus !== undefined && (
                 <span
                   style={{
                     fontSize: '11px',
-                    color: item.status === 'success' ? '#2FAF7B' : '#D4604A',
                     flexShrink: 0,
-                    fontFamily: 'monospace',
+                    fontWeight: 500,
+                    color: item.status === 'success' ? '#2FAF7B' : '#D4604A',
                   }}
                 >
-                  HTTP {item.httpStatus}
+                  {item.httpStatus === 201
+                    ? 'created'
+                    : item.httpStatus === 204
+                    ? 'updated'
+                    : `HTTP ${item.httpStatus}`}
                 </span>
               )}
             </div>
@@ -199,6 +232,29 @@ export function SyncStep({ sync, config }: SyncStepProps) {
                 }}
               >
                 {item.error}
+                {item.payload && Object.keys(item.payload).length > 0 && (
+                  <details style={{ marginTop: '6px' }}>
+                    <summary style={{ cursor: 'pointer', color: '#67768A', fontSize: '11px' }}>
+                      Show payload
+                    </summary>
+                    <pre
+                      style={{
+                        marginTop: '4px',
+                        padding: '8px',
+                        background: '#F5F5FA',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        color: '#11324D',
+                        overflow: 'auto',
+                        maxHeight: '200px',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {JSON.stringify(item.payload, null, 2)}
+                    </pre>
+                  </details>
+                )}
               </div>
             )}
           </div>
@@ -208,6 +264,9 @@ export function SyncStep({ sync, config }: SyncStepProps) {
       {/* Actions */}
       {isDone && (
         <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <Button level="tertiary" onClick={onBackToConfigure}>
+            ← Configure
+          </Button>
           {errorCount > 0 && (
             <Button level="secondary" onClick={() => retryFailed(config)}>
               Retry failed ({errorCount})

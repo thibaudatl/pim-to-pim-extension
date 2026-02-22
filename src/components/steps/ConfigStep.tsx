@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react';
 import { Button, Helper, Checkbox, Badge } from 'akeneo-design-system';
 import type { SyncConfig } from '../../sync/types';
 
@@ -22,8 +23,39 @@ export function ConfigStep({
   onConfigChange,
   onNext,
 }: ConfigStepProps) {
+  const [attrFilterOpen, setAttrFilterOpen] = useState(false);
+
   function toggle(key: keyof SyncConfig) {
     onConfigChange({ ...config, [key]: !config[key] });
+  }
+
+  const allAttributeCodes = useMemo(() => {
+    const codes = new Set<string>();
+    for (const p of products) {
+      if (p.values) for (const code of Object.keys(p.values)) codes.add(code);
+    }
+    for (const m of productModels) {
+      if (m.values) for (const code of Object.keys(m.values)) codes.add(code);
+    }
+    return Array.from(codes).sort();
+  }, [products, productModels]);
+
+  function toggleAttribute(code: string) {
+    const excluded = new Set(config.excludedAttributes);
+    if (excluded.has(code)) {
+      excluded.delete(code);
+    } else {
+      excluded.add(code);
+    }
+    onConfigChange({ ...config, excludedAttributes: Array.from(excluded) });
+  }
+
+  function toggleAllAttributes() {
+    const allExcluded = config.excludedAttributes.length === allAttributeCodes.length;
+    onConfigChange({
+      ...config,
+      excludedAttributes: allExcluded ? [] : [...allAttributeCodes],
+    });
   }
 
   const productCount = products.length;
@@ -225,9 +257,15 @@ export function ConfigStep({
           },
           {
             key: 'skipMediaValues' as const,
-            label: 'Skip media attribute values',
+            label: 'Skip assets & medias',
             description:
-              'Omit image/file attribute values — media files cannot be transferred between environments.',
+              'Omit the images/files and asset information.',
+          },
+          {
+            key: 'skipAssociations' as const,
+            label: 'Skip associations',
+            description:
+              'Omit associations and quantified associations from the synced payload.',
           },
         ].map(({ key, label, description }) => (
           <div
@@ -257,6 +295,111 @@ export function ConfigStep({
           </div>
         ))}
       </div>
+
+      {/* Attribute filter */}
+      {!loading && !error && allAttributeCodes.length > 0 && (
+        <div
+          style={{
+            border: '1px solid #E8EBEE',
+            borderRadius: '4px',
+            marginBottom: '20px',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              padding: '10px 16px',
+              borderBottom: attrFilterOpen ? '1px solid #F5F5FA' : 'none',
+              background: '#FAFAFA',
+              fontSize: '11px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              color: '#67768A',
+              cursor: 'pointer',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+            onClick={() => setAttrFilterOpen(!attrFilterOpen)}
+          >
+            <span>
+              Attribute filter
+              {config.excludedAttributes.length > 0 && (
+                <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: '8px' }}>
+                  ({allAttributeCodes.length - config.excludedAttributes.length}/{allAttributeCodes.length} selected)
+                </span>
+              )}
+            </span>
+            <span style={{ fontSize: '13px' }}>{attrFilterOpen ? '▾' : '▸'}</span>
+          </div>
+          {attrFilterOpen && (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 16px',
+                  borderBottom: '1px solid #E8EBEE',
+                  background: '#FAFAFA',
+                  cursor: 'pointer',
+                }}
+                onClick={toggleAllAttributes}
+              >
+                <div style={{ paddingTop: '2px' }}>
+                  <Checkbox
+                    checked={config.excludedAttributes.length === 0}
+                    onChange={toggleAllAttributes}
+                  >
+                    {''}
+                  </Checkbox>
+                </div>
+                <div style={{ fontSize: '13px', fontWeight: 500, color: '#11324D' }}>
+                  {config.excludedAttributes.length === 0 ? 'Deselect all' : 'Select all'}
+                </div>
+              </div>
+              <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                {allAttributeCodes.map((code) => {
+                  const isIncluded = !config.excludedAttributes.includes(code);
+                  return (
+                    <div
+                      key={code}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        padding: '8px 16px',
+                        borderBottom: '1px solid #F5F5FA',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => toggleAttribute(code)}
+                    >
+                      <div style={{ paddingTop: '2px' }}>
+                        <Checkbox
+                          checked={isIncluded}
+                          onChange={() => toggleAttribute(code)}
+                        >
+                          {''}
+                        </Checkbox>
+                      </div>
+                      <span
+                        style={{
+                          fontFamily: 'monospace',
+                          fontSize: '12px',
+                          color: isIncluded ? '#11324D' : '#A1A9B7',
+                        }}
+                      >
+                        {code}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Actions */}
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

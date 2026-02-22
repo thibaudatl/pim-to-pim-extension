@@ -16,6 +16,8 @@ const DEFAULT_CONFIG: SyncConfig = {
   includeGrandparentModels: true,
   overwriteExisting: true,
   skipMediaValues: true,
+  skipAssociations: true,
+  excludedAttributes: [],
 };
 
 export default function App() {
@@ -87,7 +89,7 @@ export default function App() {
         />
       )}
 
-      {step === 2 && <SyncStep sync={sync} config={config} />}
+      {step === 2 && <SyncStep sync={sync} config={config} onBackToConfigure={() => setStep(1)} />}
     </div>
   );
 }

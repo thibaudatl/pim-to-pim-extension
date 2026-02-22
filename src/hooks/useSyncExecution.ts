@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import type { SyncConfig, SyncItem } from '../sync/types';
-import { buildProductPayload, buildProductModelPayload } from '../sync/payloadBuilder';
+import { buildProductPayload, buildProductModelPayload, loadMediaAttributeCodes } from '../sync/payloadBuilder';
 import { pushProduct, pushProductModel } from '../sync/env2Client';
 
 export interface UseSyncExecutionResult {
@@ -32,15 +32,16 @@ export function useSyncExecution(): UseSyncExecutionResult {
     products: Product[],
     models: ProductModel[],
     ancestors: ProductModel[],
-    config: SyncConfig
+    config: SyncConfig,
+    mediaCodes: Set<string>
   ): Record<string, unknown> {
     const allModels = [...models, ...ancestors];
     if (item.type === 'product') {
       const product = products.find((p) => p.uuid === item.uuid || p.identifier === item.id);
-      return product ? buildProductPayload(product, config) : {};
+      return product ? buildProductPayload(product, config, mediaCodes) : {};
     } else {
       const model = allModels.find((m) => m.code === item.id);
-      return model ? buildProductModelPayload(model, config) : {};
+      return model ? buildProductModelPayload(model, config, mediaCodes) : {};
     }
   }
 
@@ -56,6 +57,11 @@ export function useSyncExecution(): UseSyncExecutionResult {
       setIsRunning(true);
       setIsDone(false);
 
+      // Load media attribute codes once (cached after first call)
+      const mediaCodes = config.skipMediaValues
+        ? await loadMediaAttributeCodes()
+        : new Set<string>();
+
       // Work on a mutable copy
       const current = allItems.map((i) => ({ ...i }));
 
@@ -66,12 +72,12 @@ export function useSyncExecution(): UseSyncExecutionResult {
         current[idx] = { ...current[idx], status: 'in_progress' };
         setItems([...current]);
 
-        const payload = resolvePayload(item, products, models, ancestors, config);
+        const payload = resolvePayload(item, products, models, ancestors, config, mediaCodes);
         current[idx] = { ...current[idx], payload };
 
         const result =
           item.type === 'product'
-            ? await pushProduct(payload, config, item.uuid!)
+            ? await pushProduct(payload, config, item.id)
             : await pushProductModel(payload, config);
 
         const success = result.status === 201 || result.status === 204;

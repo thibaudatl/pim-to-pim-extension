@@ -5,6 +5,11 @@ interface PushResult {
   error?: string;
 }
 
+/** The SDK throws this when it gets a 204 and tries to construct a Response with a body */
+function isNullBodyError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('null body status');
+}
+
 interface ExternalResponse {
   statusCode: number;
   body: unknown;
@@ -13,8 +18,20 @@ interface ExternalResponse {
 
 async function parseResponse(raw: unknown): Promise<ExternalResponse> {
   try {
-    const text = await (raw as { text: () => Promise<string> }).text();
+    const r = raw as Record<string, unknown>;
+
+    // The gateway may return a plain object with statusCode directly
+    if (typeof r.statusCode === 'number') {
+      return r as unknown as ExternalResponse;
+    }
+
+    // Or a Response-like object — read text safely
+    const text = typeof (r as any).text === 'function'
+      ? await (r as any).text().catch(() => '')
+      : '';
+
     console.log('[sync] response:', text);
+    if (!text) return { statusCode: 204, body: null };
     return JSON.parse(text) as ExternalResponse;
   } catch {
     return { statusCode: 0, body: null, error: 'Failed to parse gateway response' };
@@ -43,14 +60,14 @@ function formatError(body: unknown): string {
 export async function pushProduct(
   payload: Record<string, unknown>,
   config: SyncConfig,
-  uuid: string
+  identifier: string
 ): Promise<PushResult> {
-  if (!uuid) return { status: 0, error: 'Product has no UUID — cannot sync.' };
+  if (!identifier) return { status: 0, error: 'Product has no identifier — cannot sync.' };
 
   try {
     const response = await PIM.api.external.call({
       method: 'PATCH',
-      url: `${config.env2Host}/api/rest/v1/products-uuid/${uuid}`,
+      url: `${config.env2Host}/api/rest/v1/products/${encodeURIComponent(identifier)}`,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -62,6 +79,7 @@ export async function pushProduct(
     if (res.statusCode === 201 || res.statusCode === 204) return { status: res.statusCode };
     return { status: res.statusCode, error: formatError(res.body ?? res.error) };
   } catch (err) {
+    if (isNullBodyError(err)) return { status: 204 };
     return { status: 0, error: err instanceof Error ? err.message : String(err) };
   }
 }
@@ -88,6 +106,7 @@ export async function pushProductModel(
     if (res.statusCode === 201 || res.statusCode === 204) return { status: res.statusCode };
     return { status: res.statusCode, error: formatError(res.body ?? res.error) };
   } catch (err) {
+    if (isNullBodyError(err)) return { status: 204 };
     return { status: 0, error: err instanceof Error ? err.message : String(err) };
   }
 }

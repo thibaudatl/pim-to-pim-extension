@@ -5,6 +5,8 @@ export interface SyncConfig {
   includeGrandparentModels: boolean;
   overwriteExisting: boolean;
   skipMediaValues: boolean;
+  skipAssociations: boolean;
+  excludedAttributes: string[];
 }
 
 export type SyncItemType = 'product' | 'product_model';

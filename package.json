@@ -1,7 +1,7 @@
 {
   "name": "pim-to-pim-sync",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.17",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
     "akeneo-design-system": "^4.0.0",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",
-    "styled-components": "^6.1.13"
+    "styled-components": "^6.1.13",
+    "terser": "^5.46.0"
   },
   "devDependencies": {
     "@swc/core": "^1.13.5",

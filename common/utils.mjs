@@ -45,11 +45,16 @@ export const updateEnvVar = (key, value) => {
 };
 
 export const createExtensionPayload = (projectPath, withCredentials, configuration) => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8'));
+
   const payload = new FormData();
   payload.append('name', configuration.name);
   payload.append('type', configuration.type);
   payload.append('position', configuration.position);
-  payload.append('file', fs.createReadStream(path.join(projectPath, configuration.file)));
+  payload.append('version', pkg.version);
+  const filePath = path.join(projectPath, configuration.file);
+  const fileName = path.basename(filePath);
+  payload.append('file', fs.createReadStream(filePath), { filename: fileName });
   payload.append('configuration[default_label]', configuration.configuration.default_label);
 
   if (configuration.configuration.labels) {
