@@ -79,8 +79,8 @@ export async function parseResponse(raw: unknown): Promise<DestinationResponse> 
   }
 }
 
-export function formatError(body: unknown): string {
-  if (!body) return 'Unknown error';
+export function formatError(body: unknown, statusCode?: number): string {
+  if (!body) return statusCode ? `HTTP ${statusCode}` : 'Unknown error';
   if (typeof body === 'string') return body;
   if (typeof body === 'object') {
     const b = body as Record<string, unknown>;
@@ -120,7 +120,7 @@ export async function destinationGet(
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return { status: res.statusCode, body: res.body };
     }
-    return { status: res.statusCode, error: formatError(res.body ?? res.error) };
+    return { status: res.statusCode, error: formatError(res.body ?? res.error, res.statusCode) };
   } catch (err) {
     // For GET requests, null body is NOT a success — it's likely a 403 or other error
     // from the gateway that couldn't construct a Response object.
@@ -147,7 +147,7 @@ export async function destinationPatch(
     if (res.statusCode === 201 || res.statusCode === 204) {
       return { status: res.statusCode, body: res.body };
     }
-    const errorMsg = formatError(res.body ?? res.error);
+    const errorMsg = formatError(res.body ?? res.error, res.statusCode);
     if (isNullBodyErrorString(errorMsg)) return { status: 204 };
     return { status: res.statusCode, error: errorMsg };
   } catch (err) {
@@ -174,7 +174,7 @@ export async function destinationPost(
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return { status: res.statusCode, body: res.body };
     }
-    const errorMsg = formatError(res.body ?? res.error);
+    const errorMsg = formatError(res.body ?? res.error, res.statusCode);
     if (isNullBodyErrorString(errorMsg)) return { status: 204 };
     return { status: res.statusCode, error: errorMsg };
   } catch (err) {

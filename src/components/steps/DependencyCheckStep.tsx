@@ -25,6 +25,7 @@ const ProgressBar = styled.div<{ $pct: number }>`
 const TYPE_LABELS: Record<DependencyType, string> = {
   attribute: 'Attributes',
   attribute_option: 'Attribute options',
+  reference_entity_record: 'Ref. entity records',
   family: 'Families',
   family_variant: 'Family variants',
   category: 'Categories',

@@ -1,4 +1,5 @@
 import type { SyncConfig, StrippedCodes } from './types';
+import { loadAttributeTypeMap } from './dependencyExtractor';
 
 const PRODUCT_SKIP = new Set(['uuid', 'links', 'completenesses', 'created', 'updated', 'metadata']);
 const MODEL_SKIP = new Set(['links', 'created', 'updated', 'metadata']);
@@ -14,26 +15,16 @@ type AttributeValues = Record<
   Array<{ locale?: string | null; scope?: string | null; data: unknown; linked_data?: unknown }>
 >;
 
-/** Cached set of attribute codes whose type is image, file, or asset collection */
-let mediaAttributeCodes: Set<string> | null = null;
-
+/**
+ * Derive media attribute codes from the already-cached attribute type map.
+ * Reuses loadAttributeTypeMap() cache — no extra API call.
+ */
 export async function loadMediaAttributeCodes(): Promise<Set<string>> {
-  if (mediaAttributeCodes) return mediaAttributeCodes;
-
+  const typeMap = await loadAttributeTypeMap();
   const codes = new Set<string>();
-  let page = 1;
-  let hasMore = true;
-
-  while (hasMore) {
-    const result = await globalThis.PIM.api.attribute_v1.list({ limit: 100, page });
-    for (const attr of result.items) {
-      if (MEDIA_ATTRIBUTE_TYPES.has(attr.type)) codes.add(attr.code);
-    }
-    hasMore = result.items.length === 100;
-    page++;
+  for (const [code, type] of typeMap) {
+    if (MEDIA_ATTRIBUTE_TYPES.has(type)) codes.add(code);
   }
-
-  mediaAttributeCodes = codes;
   return codes;
 }
 

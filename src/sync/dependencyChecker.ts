@@ -86,7 +86,51 @@ export async function checkDependencies(
     }
   }
 
-  // 3. Families
+  // 3. Reference entity records
+  onProgress?.('Checking reference entity records…');
+  try {
+    const missingRecords: DependencyItem[] = [];
+    let totalRecords = 0;
+    for (const [refEntityCode, recordCodes] of deps.referenceEntityRecords) {
+      totalRecords += recordCodes.size;
+      try {
+        const missing = await checkRecordsByGet(refEntityCode, recordCodes, config);
+        for (const recordCode of missing) {
+          missingRecords.push({
+            type: 'reference_entity_record',
+            code: recordCode,
+            parentCode: refEntityCode,
+          });
+        }
+      } catch (err) {
+        if (err instanceof AccessDeniedError) {
+          // Skip this entity's records silently
+          continue;
+        }
+        throw err;
+      }
+    }
+    types.push({
+      type: 'reference_entity_record',
+      total: totalRecords,
+      missing: missingRecords,
+      resolution: 'create',
+    });
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      types.push({
+        type: 'reference_entity_record',
+        total: 0,
+        missing: [],
+        resolution: 'skip',
+        accessDenied: true,
+      });
+    } else {
+      throw err;
+    }
+  }
+
+  // 4. Families
   onProgress?.('Checking families…');
   try {
     const missingFamilies = await checkByIndividualGet(
@@ -101,7 +145,7 @@ export async function checkDependencies(
       resolution: 'create',
     });
 
-    // 4. Family variants
+    // 5. Family variants
     onProgress?.('Checking family variants…');
     const missingFV: DependencyItem[] = [];
     let totalFV = 0;
@@ -152,7 +196,7 @@ export async function checkDependencies(
     }
   }
 
-  // 5. Categories
+  // 6. Categories
   onProgress?.('Checking categories…');
   try {
     const missingCategories = await checkByListing(deps.categoryCodes, '/categories', config);
@@ -176,7 +220,7 @@ export async function checkDependencies(
     }
   }
 
-  // 6. Association types
+  // 7. Association types
   onProgress?.('Checking association types…');
   try {
     const missingAssocTypes = await checkByListing(
@@ -204,7 +248,7 @@ export async function checkDependencies(
     }
   }
 
-  // 7. Groups — no group API in SDK, always strip
+  // 8. Groups — no group API in SDK, always strip
   types.push({
     type: 'group',
     total: deps.groupCodes.size,
@@ -258,6 +302,41 @@ async function checkByListing(
   }
 
   return Array.from(requiredCodes).filter((code) => !existingCodes.has(code));
+}
+
+/**
+ * Check reference entity records by individual GET requests.
+ * Throws AccessDeniedError on 403/401.
+ */
+async function checkRecordsByGet(
+  refEntityCode: string,
+  requiredCodes: Set<string>,
+  config: SyncConfig
+): Promise<string[]> {
+  if (requiredCodes.size === 0) return [];
+
+  const missing: string[] = [];
+  const basePath = `/reference-entities/${encodeURIComponent(refEntityCode)}/records`;
+  let firstRequest = true;
+
+  for (const code of requiredCodes) {
+    const res = await destinationGet(
+      `${basePath}/${encodeURIComponent(code)}`,
+      config
+    );
+    if (res.status === 403 || res.status === 401) {
+      throw new AccessDeniedError(res.status);
+    }
+    if (res.status === 0 && res.error && firstRequest) {
+      throw new AccessDeniedError(403);
+    }
+    if (res.status === 404 || res.status === 0) {
+      missing.push(code);
+    }
+    firstRequest = false;
+  }
+
+  return missing;
 }
 
 /**

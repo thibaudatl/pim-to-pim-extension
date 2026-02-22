@@ -1,7 +1,7 @@
 {
   "name": "pim-to-pim-sync",
   "private": true,
-  "version": "0.0.37",
+  "version": "0.0.48",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -32,6 +32,7 @@ export interface SyncItem {
 export type DependencyType =
   | 'attribute'
   | 'attribute_option'
+  | 'reference_entity_record'
   | 'family'
   | 'family_variant'
   | 'category'
@@ -43,7 +44,7 @@ export type DependencyResolution = 'create' | 'strip' | 'skip';
 export interface DependencyItem {
   type: DependencyType;
   code: string;
-  /** For attribute_option: attribute code. For family_variant: family code */
+  /** For attribute_option: attribute code. For family_variant: family code. For reference_entity_record: reference entity code */
   parentCode?: string;
 }
 
@@ -85,4 +86,6 @@ export interface ExtractedDependencies {
   categoryCodes: Set<string>;
   associationTypeCodes: Set<string>;
   groupCodes: Set<string>;
+  /** Map of reference entity code -> set of record codes */
+  referenceEntityRecords: Map<string, Set<string>>;
 }

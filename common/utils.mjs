@@ -44,7 +44,13 @@ export const updateEnvVar = (key, value) => {
   }
 };
 
-export const createExtensionPayload = (projectPath, withCredentials, configuration) => {
+/**
+ * @param {string} projectPath
+ * @param {boolean} withCredentials
+ * @param {object} configuration
+ * @param {{ isUpdate?: boolean }} [options]
+ */
+export const createExtensionPayload = (projectPath, withCredentials, configuration, options = {}) => {
   const pkg = JSON.parse(fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8'));
 
   const payload = new FormData();
@@ -55,11 +61,15 @@ export const createExtensionPayload = (projectPath, withCredentials, configurati
   const filePath = path.join(projectPath, configuration.file);
   const fileName = path.basename(filePath);
   payload.append('file', fs.createReadStream(filePath), { filename: fileName });
-  payload.append('configuration[default_label]', configuration.configuration.default_label);
 
-  if (configuration.configuration.labels) {
-    for (const [locale, label] of Object.entries(configuration.configuration.labels)) {
-      payload.append(`configuration[labels][${locale}]`, label);
+  // Only send labels on creation — let users rename from the PIM UI after that
+  if (!options.isUpdate) {
+    payload.append('configuration[default_label]', configuration.configuration.default_label);
+
+    if (configuration.configuration.labels) {
+      for (const [locale, label] of Object.entries(configuration.configuration.labels)) {
+        payload.append(`configuration[labels][${locale}]`, label);
+      }
     }
   }
 

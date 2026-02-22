@@ -41,6 +41,9 @@ export async function createDependencies(
         case 'attribute_option':
           error = await createAttributeOption(item.code, item.parentCode!, config);
           break;
+        case 'reference_entity_record':
+          error = await createReferenceEntityRecord(item.code, item.parentCode!, config);
+          break;
         case 'family':
           error = await createFamily(item.code, config);
           break;
@@ -84,10 +87,11 @@ function orderByType(items: DependencyItem[]): DependencyItem[] {
   const typeOrder: Record<string, number> = {
     attribute: 0,
     attribute_option: 1,
-    family: 2,
-    family_variant: 3,
-    category: 4,
-    association_type: 5,
+    reference_entity_record: 2,
+    family: 3,
+    family_variant: 4,
+    category: 5,
+    association_type: 6,
   };
 
   const sorted = [...items].sort((a, b) => {
@@ -202,6 +206,33 @@ async function createAttributeOption(
 
   const res = await destinationPatch(
     `/attributes/${encodeURIComponent(attributeCode)}/options/${encodeURIComponent(optionCode)}`,
+    payload,
+    config
+  );
+  if (res.error) {
+    const bodyStr = res.body != null ? JSON.stringify(res.body) : 'null';
+    return `HTTP ${res.status} — ${res.error} | body: ${bodyStr}`;
+  }
+  return undefined;
+}
+
+async function createReferenceEntityRecord(
+  recordCode: string,
+  refEntityCode: string,
+  config: SyncConfig
+): Promise<string | undefined> {
+  const record = await globalThis.PIM.api.reference_entity_record_v1.get({
+    referenceEntityCode: refEntityCode,
+    recordCode,
+  });
+
+  const payload: Record<string, unknown> = {
+    code: record.code,
+    values: record.values,
+  };
+
+  const res = await destinationPatch(
+    `/reference-entities/${encodeURIComponent(refEntityCode)}/records/${encodeURIComponent(recordCode)}`,
     payload,
     config
   );

@@ -2,11 +2,13 @@ import { useState, useMemo, useEffect } from 'react';
 import { Button, Badge, Helper, Checkbox } from 'akeneo-design-system';
 import type { UseDependencyCheckResult } from '../../hooks/useDependencyCheck';
 import type { SyncConfig, DependencyType, DepSyncItem } from '../../sync/types';
-import { loadAttributeTypeMap } from '../../sync/dependencyExtractor';
+import { loadAttributeTypeMap, loadAttributeMetaMap } from '../../sync/dependencyExtractor';
+import type { AttributeMeta } from '../../sync/dependencyExtractor';
 
 const TYPE_LABELS: Record<DependencyType, string> = {
   attribute: 'Attributes',
   attribute_option: 'Attribute options',
+  reference_entity_record: 'Ref. entity records',
   family: 'Families',
   family_variant: 'Family variants',
   category: 'Categories',
@@ -61,6 +63,12 @@ function ExpandableError({ error }: { error: string }) {
   );
 }
 
+interface AttributeGroup {
+  groupCode: string;
+  label: string;
+  codes: string[];
+}
+
 interface FilterStepProps {
   depCheck: UseDependencyCheckResult;
   products: Product[];
@@ -82,30 +90,57 @@ export function FilterStep({
 }: FilterStepProps) {
   const { report, depSyncItems } = depCheck;
   const [search, setSearch] = useState('');
-  const [attrTypeMap, setAttrTypeMap] = useState<Map<string, string>>(new Map());
+  const [attrMetaMap, setAttrMetaMap] = useState<Map<string, AttributeMeta>>(new Map());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const hasErrors = depSyncItems.some((i) => i.status === 'error');
   const createdCount = depSyncItems.filter((i) => i.status === 'success').length;
   const errorCount = depSyncItems.filter((i) => i.status === 'error').length;
   const noMissing = report?.totalMissing === 0;
 
-  // Load cached attribute type map
+  const catalogLocale = globalThis.PIM.context.user.catalog_locale;
+
+  // Load cached attribute meta map (populated by loadAttributeTypeMap)
   useEffect(() => {
-    loadAttributeTypeMap().then(setAttrTypeMap);
+    loadAttributeTypeMap().then(() => {
+      setAttrMetaMap(loadAttributeMetaMap());
+    });
   }, []);
 
-  // Set of attribute codes missing from destination
+  // Set of attribute codes still missing (exclude successfully created ones)
   const missingAttrCodes = useMemo(() => {
     const codes = new Set<string>();
     const attrReport = report?.types.find((t) => t.type === 'attribute');
     if (attrReport) {
       for (const item of attrReport.missing) codes.add(item.code);
     }
+    // Remove attributes that were successfully created during dependency sync
+    for (const item of depSyncItems) {
+      if (item.type === 'attribute' && item.status === 'success') {
+        codes.delete(item.code);
+      }
+    }
     return codes;
-  }, [report]);
+  }, [report, depSyncItems]);
 
-  // All attribute codes sorted: missing first, then alphabetical
-  const sortedAttributeCodes = useMemo(() => {
+  // Auto-exclude missing attributes by default
+  useEffect(() => {
+    if (missingAttrCodes.size === 0) return;
+    const excluded = new Set(config.excludedAttributes);
+    let changed = false;
+    for (const code of missingAttrCodes) {
+      if (!excluded.has(code)) {
+        excluded.add(code);
+        changed = true;
+      }
+    }
+    if (changed) {
+      onConfigChange({ ...config, excludedAttributes: Array.from(excluded) });
+    }
+  }, [missingAttrCodes]);
+
+  // All attribute codes from products/models
+  const allAttributeCodes = useMemo(() => {
     const codes = new Set<string>();
     for (const p of products) {
       if (p.values) for (const code of Object.keys(p.values)) codes.add(code);
@@ -113,25 +148,101 @@ export function FilterStep({
     for (const m of productModels) {
       if (m.values) for (const code of Object.keys(m.values)) codes.add(code);
     }
-    return Array.from(codes).sort((a, b) => {
-      const aMissing = missingAttrCodes.has(a);
-      const bMissing = missingAttrCodes.has(b);
-      if (aMissing && !bMissing) return -1;
-      if (!aMissing && bMissing) return 1;
-      return a.localeCompare(b);
-    });
-  }, [products, productModels, missingAttrCodes]);
+    return codes;
+  }, [products, productModels]);
 
-  // Filtered by search
-  const filteredAttributeCodes = useMemo(() => {
-    if (!search.trim()) return sortedAttributeCodes;
-    const q = search.toLowerCase();
-    return sortedAttributeCodes.filter((code) => {
+  // Build grouped data structure
+  const { missingCodes, groups, totalVisible } = useMemo(() => {
+    const excluded = new Set(config.excludedAttributes);
+    const q = search.toLowerCase().trim();
+
+    /** Resolve the display label for an attribute */
+    function attrLabel(code: string): string {
+      const meta = attrMetaMap.get(code);
+      if (meta?.labels) {
+        return meta.labels[catalogLocale] || meta.labels['en_US'] || code;
+      }
+      return code;
+    }
+
+    /** Format raw PIM attribute type for display */
+    function formatType(code: string): string {
+      const meta = attrMetaMap.get(code);
+      if (!meta) return '';
+      return meta.type.replace(/^pim_catalog_/, '').replace(/_/g, ' ');
+    }
+
+    /** Check if attribute matches search */
+    function matchesSearch(code: string): boolean {
+      if (!q) return true;
       if (code.toLowerCase().includes(q)) return true;
-      const type = attrTypeMap.get(code);
-      return type ? type.toLowerCase().includes(q) : false;
-    });
-  }, [sortedAttributeCodes, search, attrTypeMap]);
+      const meta = attrMetaMap.get(code);
+      if (meta) {
+        if (meta.type.toLowerCase().includes(q)) return true;
+        const label = meta.labels[catalogLocale] || meta.labels['en_US'] || '';
+        if (label.toLowerCase().includes(q)) return true;
+      }
+      return false;
+    }
+
+    // Separate missing from grouped
+    const missingArr: string[] = [];
+    const groupMap = new Map<string, { label: string; codes: { code: string; sortOrder: number }[] }>();
+
+    for (const code of allAttributeCodes) {
+      if (!matchesSearch(code)) continue;
+
+      if (missingAttrCodes.has(code)) {
+        missingArr.push(code);
+      } else {
+        const meta = attrMetaMap.get(code);
+        const groupCode = meta?.group || 'other';
+        const groupLabel = meta?.groupLabels?.[catalogLocale]
+          || meta?.groupLabels?.['en_US']
+          || groupCode;
+        const sortOrder = meta?.sortOrder ?? 0;
+
+        if (!groupMap.has(groupCode)) {
+          groupMap.set(groupCode, { label: groupLabel, codes: [] });
+        }
+        groupMap.get(groupCode)!.codes.push({ code, sortOrder });
+      }
+    }
+
+    // Sort missing alphabetically
+    missingArr.sort((a, b) => a.localeCompare(b));
+
+    // Build sorted groups
+    const groupArr: AttributeGroup[] = Array.from(groupMap.entries())
+      .sort(([, a], [, b]) => a.label.localeCompare(b.label))
+      .map(([groupCode, { label, codes }]) => ({
+        groupCode,
+        label,
+        codes: codes
+          .sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code))
+          .map((c) => c.code),
+      }));
+
+    let total = missingArr.length;
+    for (const g of groupArr) total += g.codes.length;
+
+    return { missingCodes: missingArr, groups: groupArr, totalVisible: total };
+  }, [allAttributeCodes, missingAttrCodes, attrMetaMap, search, catalogLocale, config.excludedAttributes]);
+
+  // --- Helpers ---
+
+  function formatAttrType(code: string): string | null {
+    const meta = attrMetaMap.get(code);
+    if (!meta) return null;
+    return meta.type.replace(/^pim_catalog_/, '').replace(/_/g, ' ');
+  }
+
+  function getAttrLabel(code: string): string | null {
+    const meta = attrMetaMap.get(code);
+    if (!meta?.labels) return null;
+    const label = meta.labels[catalogLocale] || meta.labels['en_US'];
+    return label || null;
+  }
 
   function toggleAttribute(code: string) {
     const excluded = new Set(config.excludedAttributes);
@@ -144,18 +255,116 @@ export function FilterStep({
   }
 
   function toggleAllAttributes() {
-    const allExcluded = config.excludedAttributes.length === sortedAttributeCodes.length;
+    const allCodes = Array.from(allAttributeCodes);
+    const allExcluded = config.excludedAttributes.length === allCodes.length;
     onConfigChange({
       ...config,
-      excludedAttributes: allExcluded ? [] : [...sortedAttributeCodes],
+      excludedAttributes: allExcluded ? [] : [...allCodes],
     });
   }
 
-  /** Format raw PIM attribute type for display (e.g. pim_catalog_text -> text) */
-  function formatAttrType(code: string): string | null {
-    const raw = attrTypeMap.get(code);
-    if (!raw) return null;
-    return raw.replace(/^pim_catalog_/, '').replace(/_/g, ' ');
+  function toggleGroup(groupCode: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupCode)) {
+        next.delete(groupCode);
+      } else {
+        next.add(groupCode);
+      }
+      return next;
+    });
+  }
+
+  function toggleGroupSelection(codesInGroup: string[]) {
+    const excluded = new Set(config.excludedAttributes);
+    const allExcluded = codesInGroup.every((c) => excluded.has(c));
+    for (const code of codesInGroup) {
+      if (allExcluded) {
+        excluded.delete(code);
+      } else {
+        excluded.add(code);
+      }
+    }
+    onConfigChange({ ...config, excludedAttributes: Array.from(excluded) });
+  }
+
+  function getGroupCheckState(codesInGroup: string[]): boolean | 'mixed' {
+    const excluded = new Set(config.excludedAttributes);
+    const includedCount = codesInGroup.filter((c) => !excluded.has(c)).length;
+    if (includedCount === 0) return false;
+    if (includedCount === codesInGroup.length) return true;
+    return 'mixed';
+  }
+
+  // --- Attribute row renderer ---
+
+  function renderAttributeRow(code: string, isMissing: boolean) {
+    const isIncluded = !config.excludedAttributes.includes(code);
+    const typeLabel = formatAttrType(code);
+    const label = getAttrLabel(code);
+
+    return (
+      <div
+        key={code}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '6px 16px',
+          paddingLeft: isMissing ? '16px' : '36px',
+          borderBottom: '1px solid #F5F5FA',
+          cursor: isMissing ? 'default' : 'pointer',
+          background: isMissing ? '#FFF5F5' : '#FFFFFF',
+          opacity: isMissing ? 0.6 : 1,
+        }}
+        onClick={isMissing ? undefined : () => toggleAttribute(code)}
+      >
+        <div style={{ paddingTop: '2px' }}>
+          <Checkbox
+            checked={isIncluded}
+            readOnly={isMissing}
+            onChange={isMissing ? undefined : () => toggleAttribute(code)}
+          >
+            {''}
+          </Checkbox>
+        </div>
+        <span
+          style={{
+            fontFamily: 'monospace',
+            fontSize: '12px',
+            color: isMissing ? '#D4604A' : isIncluded ? '#11324D' : '#A1A9B7',
+            fontWeight: isMissing ? 600 : 400,
+            flex: 1,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {code}
+          {label && (
+            <span style={{ fontFamily: 'sans-serif', color: '#67768A', fontWeight: 400, marginLeft: '6px' }}>
+              {label}
+            </span>
+          )}
+        </span>
+        {isMissing && (
+          <span style={{
+            fontSize: '10px', fontWeight: 600, color: '#D4604A',
+            padding: '1px 6px', background: '#FFF5F5', border: '1px solid #D4604A',
+            borderRadius: '3px', flexShrink: 0,
+          }}>
+            missing
+          </span>
+        )}
+        {typeLabel && (
+          <span style={{
+            fontSize: '11px', color: '#67768A', flexShrink: 0,
+          }}>
+            {typeLabel}
+          </span>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -234,8 +443,8 @@ export function FilterStep({
         </div>
       )}
 
-      {/* Attribute filter — always expanded */}
-      {sortedAttributeCodes.length > 0 && (
+      {/* Attribute filter — grouped by attribute group */}
+      {allAttributeCodes.size > 0 && (
         <div
           style={{
             border: '1px solid #E8EBEE',
@@ -264,7 +473,7 @@ export function FilterStep({
               Attribute filter
               {config.excludedAttributes.length > 0 && (
                 <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: '8px' }}>
-                  ({sortedAttributeCodes.length - config.excludedAttributes.length}/{sortedAttributeCodes.length} selected)
+                  ({allAttributeCodes.size - config.excludedAttributes.length}/{allAttributeCodes.size} selected)
                 </span>
               )}
             </span>
@@ -317,65 +526,107 @@ export function FilterStep({
             </div>
           </div>
 
-          {/* Attribute list */}
-          <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
-            {filteredAttributeCodes.map((code) => {
-              const isIncluded = !config.excludedAttributes.includes(code);
-              const isMissing = missingAttrCodes.has(code);
-              const typeLabel = formatAttrType(code);
-              return (
+          {/* Grouped attribute list */}
+          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {/* Missing attributes section (ungrouped, at top) */}
+            {missingCodes.length > 0 && (
+              <div>
                 <div
-                  key={code}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '12px',
+                    gap: '8px',
                     padding: '8px 16px',
-                    borderBottom: '1px solid #F5F5FA',
-                    cursor: 'pointer',
-                    background: isMissing ? '#FFF5F5' : '#FFFFFF',
+                    background: '#FFF5F5',
+                    borderBottom: '1px solid #F5D4CF',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: '#D4604A',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.03em',
                   }}
-                  onClick={() => toggleAttribute(code)}
                 >
-                  <div style={{ paddingTop: '2px' }}>
-                    <Checkbox
-                      checked={isIncluded}
-                      onChange={() => toggleAttribute(code)}
-                    >
-                      {''}
-                    </Checkbox>
-                  </div>
-                  <span
+                  <span>Missing in destination ({missingCodes.length})</span>
+                </div>
+                {missingCodes.map((code) => renderAttributeRow(code, true))}
+              </div>
+            )}
+
+            {/* Attribute groups */}
+            {groups.map((group) => {
+              const isCollapsed = collapsedGroups.has(group.groupCode);
+              const checkState = getGroupCheckState(group.codes);
+
+              return (
+                <div key={group.groupCode}>
+                  {/* Group header */}
+                  <div
                     style={{
-                      fontFamily: 'monospace',
-                      fontSize: '12px',
-                      color: isMissing ? '#D4604A' : isIncluded ? '#11324D' : '#A1A9B7',
-                      fontWeight: isMissing ? 600 : 400,
-                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '8px 16px',
+                      background: '#FAFAFA',
+                      borderBottom: '1px solid #E8EBEE',
+                      cursor: 'pointer',
+                      userSelect: 'none',
                     }}
                   >
-                    {code}
-                  </span>
-                  {isMissing && (
-                    <span style={{
-                      fontSize: '10px', fontWeight: 600, color: '#D4604A',
-                      padding: '1px 6px', background: '#FFF5F5', border: '1px solid #D4604A',
-                      borderRadius: '3px', flexShrink: 0,
-                    }}>
-                      missing
+                    {/* Collapse arrow */}
+                    <span
+                      onClick={() => toggleGroup(group.groupCode)}
+                      style={{
+                        fontSize: '12px',
+                        color: '#67768A',
+                        width: '16px',
+                        textAlign: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isCollapsed ? '▸' : '▾'}
                     </span>
-                  )}
-                  {typeLabel && (
-                    <span style={{
-                      fontSize: '11px', color: '#67768A', flexShrink: 0,
-                    }}>
-                      {typeLabel}
+                    {/* Group checkbox */}
+                    <div
+                      style={{ paddingTop: '2px' }}
+                      onClick={(e) => { e.stopPropagation(); toggleGroupSelection(group.codes); }}
+                    >
+                      <Checkbox
+                        checked={checkState === true}
+                        undetermined={checkState === 'mixed'}
+                        onChange={() => toggleGroupSelection(group.codes)}
+                      >
+                        {''}
+                      </Checkbox>
+                    </div>
+                    {/* Group label + count */}
+                    <span
+                      onClick={() => toggleGroup(group.groupCode)}
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 500,
+                        color: '#11324D',
+                        flex: 1,
+                      }}
+                    >
+                      {group.label}
+                      <span style={{
+                        fontWeight: 400,
+                        color: '#67768A',
+                        marginLeft: '6px',
+                        fontSize: '12px',
+                      }}>
+                        ({group.codes.length})
+                      </span>
                     </span>
-                  )}
+                  </div>
+
+                  {/* Group attributes (collapsible) */}
+                  {!isCollapsed && group.codes.map((code) => renderAttributeRow(code, false))}
                 </div>
               );
             })}
-            {filteredAttributeCodes.length === 0 && (
+
+            {totalVisible === 0 && (
               <div style={{ padding: '16px', textAlign: 'center', fontSize: '13px', color: '#67768A' }}>
                 No attributes match "{search}"
               </div>

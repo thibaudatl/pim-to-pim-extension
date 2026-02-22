@@ -43,7 +43,7 @@ const withCredentials = process.argv.includes('--with-credentials');
 const configPath = path.join(PROJECT_PATH, 'extension_configuration.json');
 const configuration = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-const payload = createExtensionPayload(PROJECT_PATH, withCredentials, configuration);
+const payload = createExtensionPayload(PROJECT_PATH, withCredentials, configuration, { isUpdate: true });
 (async () => {
   try {
     console.log(`Updating extension with UUID: ${EXTENSION_UUID} on ${PIM_HOST}...`);

@@ -7,7 +7,7 @@ import type {
   DepSyncItem,
   StrippedCodes,
 } from '../sync/types';
-import { loadAttributeTypeMap, extractDependencies } from '../sync/dependencyExtractor';
+import { loadAttributeTypeMap, loadReferenceDataNameMap, extractDependencies } from '../sync/dependencyExtractor';
 import { checkDependencies } from '../sync/dependencyChecker';
 import { createDependencies } from '../sync/dependencyCreator';
 
@@ -72,9 +72,10 @@ export function useDependencyCheck(): UseDependencyCheckResult {
         const allModels = [...productModels, ...ancestorModels];
 
         const attrTypeMap = await loadAttributeTypeMap();
+        const refDataNameMap = loadReferenceDataNameMap();
         setProgressMessage('Extracting dependencies from products…');
 
-        const deps = extractDependencies(products, allModels, attrTypeMap);
+        const deps = extractDependencies(products, allModels, attrTypeMap, refDataNameMap);
 
         const depReport = await checkDependencies(deps, config, (msg) => {
           setProgressMessage(msg);
