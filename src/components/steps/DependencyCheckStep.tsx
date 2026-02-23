@@ -25,7 +25,9 @@ const ProgressBar = styled.div<{ $pct: number }>`
 const TYPE_LABELS: Record<DependencyType, string> = {
   attribute: 'Attributes',
   attribute_option: 'Attribute options',
+  reference_entity: 'Reference entities',
   reference_entity_record: 'Ref. entity records',
+  asset_family: 'Asset families',
   asset: 'Assets',
   family: 'Families',
   family_variant: 'Family variants',
@@ -168,6 +170,13 @@ export function DependencyCheckStep({ depCheck, config, onBack }: DependencyChec
             <strong>{report.totalMissing}</strong> missing dependenc{report.totalMissing === 1 ? 'y' : 'ies'} detected in the destination environment.
             Choose how to handle each type below.
           </div>
+        ) : report.hasInfoWarnings ? (
+          <div style={{
+            padding: '12px 16px', background: '#EBF5FB', border: '1px solid #4A90D9',
+            borderRadius: '4px', marginBottom: '16px', fontSize: '13px', color: '#11324D',
+          }}>
+            All actionable dependencies are present, but some structural definitions are missing in the destination.
+          </div>
         ) : (
           <div style={{
             padding: '12px 16px', background: '#F0FDF4', border: '1px solid #2FAF7B',
@@ -187,7 +196,10 @@ export function DependencyCheckStep({ depCheck, config, onBack }: DependencyChec
               onResolutionChange={depCheck.setResolution}
               excludedCodes={t.type === 'attribute' ? excludedAttributes : t.type === 'category' ? excludedCategories : undefined}
               onExcludeChange={handleExcludeChange}
-              disabled={t.type === 'category' && config.skipCategories}
+              disabled={
+                (t.type === 'category' && config.skipCategories) ||
+                ((t.type === 'asset' || t.type === 'asset_family') && config.skipMediaValues)
+              }
             />
           ))}
         </div>
@@ -285,9 +297,10 @@ function TypeCard({
   disabled?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const { type, total, missing, resolution, accessDenied } = typeReport;
+  const { type, total, missing, resolution, accessDenied, informational } = typeReport;
   const allPresent = missing.length === 0 && !accessDenied;
   const isGroupType = type === 'group';
+  const isInfoType = informational === true;
   const supportsExclusion = (type === 'attribute' || type === 'category') && missing.length > 0;
   const excluded = excludedCodes ?? [];
   const excludedSet = new Set(excluded);
@@ -318,8 +331,9 @@ function TypeCard({
     );
   }
 
-  const borderColor = accessDenied ? '#67768A' : allPresent ? '#2FAF7B' : resolution === 'create' ? '#F5A623' : '#D4604A';
-  const bgColor = accessDenied ? '#F5F5FA' : allPresent ? '#F0FDF4' : '#FFFFFF';
+  const infoHasMissing = isInfoType && missing.length > 0;
+  const borderColor = accessDenied ? '#67768A' : allPresent ? '#2FAF7B' : infoHasMissing ? '#4A90D9' : resolution === 'create' ? '#F5A623' : '#D4604A';
+  const bgColor = accessDenied ? '#F5F5FA' : allPresent ? '#F0FDF4' : infoHasMissing ? '#EBF5FB' : '#FFFFFF';
 
   function toggleItem(code: string) {
     if (!onExcludeChange) return;
@@ -349,9 +363,9 @@ function TypeCard({
       >
         <span style={{
           fontSize: '14px', fontWeight: 700, flexShrink: 0,
-          color: accessDenied ? '#67768A' : allPresent ? '#2FAF7B' : '#F5A623',
+          color: accessDenied ? '#67768A' : allPresent ? '#2FAF7B' : infoHasMissing ? '#4A90D9' : '#F5A623',
         }}>
-          {accessDenied ? '⊘' : allPresent ? '✓' : '!'}
+          {accessDenied ? '⊘' : allPresent ? '✓' : infoHasMissing ? 'ℹ' : '!'}
         </span>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '13px', fontWeight: 500, color: '#11324D' }}>
@@ -370,7 +384,7 @@ function TypeCard({
               : `${missing.length} missing out of ${total}`}
           </div>
         </div>
-        {!accessDenied && !allPresent && !isGroupType && (
+        {!accessDenied && !allPresent && !isGroupType && !isInfoType && (
           <select
             value={resolution}
             onClick={(e) => e.stopPropagation()}
@@ -389,6 +403,11 @@ function TypeCard({
         {!accessDenied && !allPresent && isGroupType && (
           <span style={{ fontSize: '12px', color: '#67768A', fontStyle: 'italic' }}>
             Strip only (no group API)
+          </span>
+        )}
+        {!accessDenied && !allPresent && isInfoType && (
+          <span style={{ fontSize: '12px', color: '#4A90D9', fontStyle: 'italic' }}>
+            Info only — must be created manually
           </span>
         )}
         {missing.length > 0 && (

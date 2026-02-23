@@ -95,7 +95,7 @@ export function useDependencyCheck(): UseDependencyCheckResult {
 
         const hasAccessDenied = depReport.types.some((t) => t.accessDenied);
 
-        if (depReport.totalMissing === 0 && !hasAccessDenied) {
+        if (depReport.totalMissing === 0 && !hasAccessDenied && !depReport.hasInfoWarnings) {
           setPhase('done');
           setProgressMessage('');
         } else {

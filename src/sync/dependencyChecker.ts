@@ -92,7 +92,40 @@ export async function checkDependencies(
     }
   }
 
-  // 3. Reference entity records
+  // 3. Reference entities (informational — checks if parent definitions exist)
+  if (deps.referenceEntityRecords.size > 0) {
+    onProgress?.('Checking reference entities…');
+    const refEntityCodes = new Set(deps.referenceEntityRecords.keys());
+    try {
+      const missingRefEntities = await checkByIndividualGet(
+        refEntityCodes,
+        (code) => `/reference-entities/${encodeURIComponent(code)}`,
+        config
+      );
+      types.push({
+        type: 'reference_entity',
+        total: refEntityCodes.size,
+        missing: missingRefEntities.map((code) => ({ type: 'reference_entity', code })),
+        resolution: 'skip',
+        informational: true,
+      });
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        types.push({
+          type: 'reference_entity',
+          total: refEntityCodes.size,
+          missing: [],
+          resolution: 'skip',
+          accessDenied: true,
+          informational: true,
+        });
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  // 4. Reference entity records
   onProgress?.('Checking reference entity records…');
   try {
     const missingRecords: DependencyItem[] = [];
@@ -136,50 +169,106 @@ export async function checkDependencies(
     }
   }
 
-  // 4. Assets — batched search per asset family
-  onProgress?.('Checking assets…');
-  try {
-    const missingAssets: DependencyItem[] = [];
-    let totalAssets = 0;
-    for (const [assetFamilyCode, assetCodes] of deps.assets) {
-      totalAssets += assetCodes.size;
+  // 5. Asset families (informational — checks if parent definitions exist)
+  if (deps.assets.size > 0) {
+    const assetFamilyCodes = new Set(deps.assets.keys());
+    if (config.skipMediaValues) {
+      types.push({
+        type: 'asset_family',
+        total: assetFamilyCodes.size,
+        missing: [],
+        resolution: 'skip',
+        informational: true,
+      });
+    } else {
+      onProgress?.('Checking asset families…');
       try {
-        const missing = await checkBySearchIN(
-          assetCodes,
-          `/asset-families/${encodeURIComponent(assetFamilyCode)}/assets`,
+        const missingAssetFamilies = await checkByIndividualGet(
+          assetFamilyCodes,
+          (code) => `/asset-families/${encodeURIComponent(code)}`,
           config
         );
-        for (const assetCode of missing) {
-          missingAssets.push({
-            type: 'asset',
-            code: assetCode,
-            parentCode: assetFamilyCode,
-          });
-        }
+        types.push({
+          type: 'asset_family',
+          total: assetFamilyCodes.size,
+          missing: missingAssetFamilies.map((code) => ({ type: 'asset_family', code })),
+          resolution: 'skip',
+          informational: true,
+        });
       } catch (err) {
         if (err instanceof AccessDeniedError) {
-          continue;
+          types.push({
+            type: 'asset_family',
+            total: assetFamilyCodes.size,
+            missing: [],
+            resolution: 'skip',
+            accessDenied: true,
+            informational: true,
+          });
+        } else {
+          throw err;
         }
-        throw err;
       }
+    }
+  }
+
+  // 6. Assets — batched search per asset family
+  if (config.skipMediaValues) {
+    let totalAssets = 0;
+    for (const [, assetCodes] of deps.assets) {
+      totalAssets += assetCodes.size;
     }
     types.push({
       type: 'asset',
       total: totalAssets,
-      missing: missingAssets,
-      resolution: 'create',
+      missing: [],
+      resolution: 'skip',
     });
-  } catch (err) {
-    if (err instanceof AccessDeniedError) {
+  } else {
+    onProgress?.('Checking assets…');
+    try {
+      const missingAssets: DependencyItem[] = [];
+      let totalAssets = 0;
+      for (const [assetFamilyCode, assetCodes] of deps.assets) {
+        totalAssets += assetCodes.size;
+        try {
+          const missing = await checkBySearchIN(
+            assetCodes,
+            `/asset-families/${encodeURIComponent(assetFamilyCode)}/assets`,
+            config
+          );
+          for (const assetCode of missing) {
+            missingAssets.push({
+              type: 'asset',
+              code: assetCode,
+              parentCode: assetFamilyCode,
+            });
+          }
+        } catch (err) {
+          if (err instanceof AccessDeniedError) {
+            continue;
+          }
+          throw err;
+        }
+      }
       types.push({
         type: 'asset',
-        total: 0,
-        missing: [],
-        resolution: 'skip',
-        accessDenied: true,
+        total: totalAssets,
+        missing: missingAssets,
+        resolution: 'create',
       });
-    } else {
-      throw err;
+    } catch (err) {
+      if (err instanceof AccessDeniedError) {
+        types.push({
+          type: 'asset',
+          total: 0,
+          missing: [],
+          resolution: 'skip',
+          accessDenied: true,
+        });
+      } else {
+        throw err;
+      }
     }
   }
 
@@ -318,8 +407,9 @@ export async function checkDependencies(
     resolution: 'strip',
   });
 
-  const totalMissing = types.reduce((sum, t) => sum + t.missing.length, 0);
-  return { types, totalMissing };
+  const totalMissing = types.reduce((sum, t) => t.informational ? sum : sum + t.missing.length, 0);
+  const hasInfoWarnings = types.some((t) => t.informational && t.missing.length > 0);
+  return { types, totalMissing, hasInfoWarnings };
 }
 
 /**

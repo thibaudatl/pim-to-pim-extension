@@ -34,7 +34,9 @@ export interface SyncItem {
 export type DependencyType =
   | 'attribute'
   | 'attribute_option'
+  | 'reference_entity'
   | 'reference_entity_record'
+  | 'asset_family'
   | 'asset'
   | 'family'
   | 'family_variant'
@@ -58,11 +60,15 @@ export interface DependencyTypeReport {
   resolution: DependencyResolution;
   /** True when the destination returned 403/401 — check was skipped for this type */
   accessDenied?: boolean;
+  /** True for display-only types (e.g. reference entities, asset families) — no auto-create/strip actions */
+  informational?: boolean;
 }
 
 export interface DependencyReport {
   types: DependencyTypeReport[];
   totalMissing: number;
+  /** True when any informational type has missing items (forces report display). */
+  hasInfoWarnings?: boolean;
   /** Diagnostic messages from search/parse fallbacks (visible in report UI). */
   diagnostics?: string[];
 }
